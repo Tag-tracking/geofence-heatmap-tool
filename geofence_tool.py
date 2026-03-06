@@ -45,36 +45,32 @@ for row in geo_df.iloc[:,0]:
         continue
 
     zone = parts[1]
+
     coords = []
 
-   for i in range(5, len(parts), 2):
+    for i in range(5, len(parts), 2):
+        try:
+            lon = float(parts[i])
+            lat = float(parts[i+1])
 
-    try:
-        lon = float(parts[i])
-        lat = float(parts[i+1])
+            # reject zero coords (causes equator bug)
+            if lon == 0 or lat == 0:
+                continue
 
-        # reject zeros
-        if lon == 0 or lat == 0:
+            # reject impossible coords
+            if abs(lat) > 90 or abs(lon) > 180:
+                continue
+
+            coords.append((lat, lon))
+
+        except:
             continue
-
-        # reject impossible coords
-        if abs(lat) > 90 or abs(lon) > 180:
-            continue
-
-        # reject coordinates too far from the course
-        if abs(lat) < 30:     # your course is ~37 latitude
-            continue
-
-        coords.append((lat, lon))
-
-    except:
-        continue
 
     # Only create valid polygons
     if len(coords) >= 3:
         polygons.append({
             "zone": zone,
-            "polygon": Polygon([(lon, lat) for lat, lon in coords])
+            "polygon": Polygon(coords)
         })
 # Count infringements
 for poly in polygons:
@@ -191,6 +187,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
