@@ -50,21 +50,24 @@ for row in geo_lines:
 
     coords = []
 
-    # Extract coordinate pairs safely
-    for i in range(6, len(parts)-1, 2):
+i = 6
 
-        try:
-            lon = float(parts[i])
-            lat = float(parts[i+1])
+while i < len(parts) - 1:
 
-            # ignore impossible coordinates
-            if abs(lat) > 90 or abs(lon) > 180:
-                continue
+    try:
+        lon = float(parts[i])
+        lat = float(parts[i+1])
 
-            coords.append((lon, lat))
+        # stop when metadata begins
+        if abs(lat) > 90 or abs(lon) > 180:
+            break
 
-        except:
-            continue
+        coords.append((lon, lat))
+
+    except:
+        break
+
+    i += 2
 
     # Remove duplicates that appear in GTPEO exports
     coords = list(dict.fromkeys(coords))
@@ -199,6 +202,7 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
 
 
