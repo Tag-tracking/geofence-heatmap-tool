@@ -47,28 +47,40 @@ for row in geo_df.iloc[:,0]:
     zone = parts[1]
     coords = []
 
-    for i in range(5, len(parts), 2):
+    i = 5
+    while i < len(parts)-1:
+
         try:
             lon = float(parts[i])
             lat = float(parts[i+1])
 
-            # skip bad coordinates
+            # skip clearly invalid points
             if lon == 0 and lat == 0:
+                i += 2
                 continue
 
             if abs(lat) > 90 or abs(lon) > 180:
+                i += 2
                 continue
 
             coords.append((lat, lon))
 
         except:
-            continue
+            pass
 
+        i += 2
+
+    # create polygon only if valid
     if len(coords) >= 3:
-        polygons.append({
-            "zone": zone,
-            "polygon": Polygon(coords)
-        })
+        try:
+            poly = Polygon(coords)
+            if poly.is_valid:
+                polygons.append({
+                    "zone": zone,
+                    "polygon": poly
+                })
+        except:
+            pass
 # Count infringements
 for poly in polygons:
 
@@ -184,6 +196,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
