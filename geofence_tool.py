@@ -34,7 +34,7 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     except:
         pass
 
-# Read geofence file as raw text
+# Read geofence file
 geo_lines = geo_file.getvalue().decode("utf-8").splitlines()
 
 polygons = []
@@ -47,10 +47,11 @@ for row in geo_lines:
         continue
 
     zone = parts[1]
+
     coords = []
 
-    i = 5
-    while i < len(parts) - 1:
+    # Extract coordinate pairs safely
+    for i in range(5, len(parts)-1, 2):
 
         try:
             lon = float(parts[i])
@@ -58,20 +59,15 @@ for row in geo_lines:
 
             # ignore impossible coordinates
             if abs(lat) > 90 or abs(lon) > 180:
-                i += 2
-                continue
-
-            # ignore zero coords
-            if lat == 0 and lon == 0:
-                i += 2
                 continue
 
             coords.append((lon, lat))
 
         except:
-            pass
+            continue
 
-        i += 2
+    # Remove duplicates that appear in GTPEO exports
+    coords = list(dict.fromkeys(coords))
 
     if len(coords) >= 3:
         try:
@@ -84,7 +80,6 @@ for row in geo_lines:
                 })
         except:
             pass
-
 
 # Count infringements
 for poly in polygons:
@@ -204,3 +199,4 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
