@@ -41,10 +41,10 @@ for row in geo_df.iloc[:,0]:
 
     parts = str(row).split(",")
 
-    if len(parts) < 10:
-        continue
+   if len(parts) < 10:
+    continue
 
-   zone = parts[1]
+zone = parts[1]
 
 coords = []
 
@@ -64,14 +64,11 @@ for i in range(5, len(parts), 2):
     except:
         continue
 
-
-# polygon creation must be AFTER the loop
 if len(coords) >= 3:
     polygons.append({
         "zone": zone,
         "polygon": Polygon(coords)
     })
-
 # Count infringements
 for poly in polygons:
 
@@ -187,3 +184,4 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
