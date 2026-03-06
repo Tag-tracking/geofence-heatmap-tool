@@ -108,6 +108,9 @@ for poly in polygons:
 
 results = pd.DataFrame(polygons)
 
+# Remove duplicate zones created by GTPEO coordinate repetition
+results = results.drop_duplicates(subset="zone")
+
 if len(results) == 0:
     st.error("No geofences detected in file.")
     st.stop()
@@ -212,6 +215,7 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
 
 
