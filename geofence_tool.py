@@ -21,6 +21,7 @@ if not points_file or not geo_file:
 
 points_df = pd.read_csv(points_file)
 geo_df = pd.read_csv(geo_file, header=None)
+geo_df = geo_df.astype(str)
 
 # Detect lat/lon columns
 lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
@@ -196,6 +197,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
