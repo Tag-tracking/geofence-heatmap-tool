@@ -45,7 +45,6 @@ for row in geo_df.iloc[:,0]:
         continue
 
     zone = parts[1]
-
     coords = []
 
     for i in range(5, len(parts), 2):
@@ -53,11 +52,10 @@ for row in geo_df.iloc[:,0]:
             lon = float(parts[i])
             lat = float(parts[i+1])
 
-            # reject zero coords (causes equator bug)
-            if lon == 0 or lat == 0:
+            # skip bad coordinates
+            if lon == 0 and lat == 0:
                 continue
 
-            # reject impossible coords
             if abs(lat) > 90 or abs(lon) > 180:
                 continue
 
@@ -66,7 +64,6 @@ for row in geo_df.iloc[:,0]:
         except:
             continue
 
-    # Only create valid polygons
     if len(coords) >= 3:
         polygons.append({
             "zone": zone,
@@ -187,6 +184,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
