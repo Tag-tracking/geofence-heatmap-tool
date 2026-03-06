@@ -37,38 +37,42 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
 # Parse geofences
 polygons = []
 
+# Parse geofences
+polygons = []
+
 for row in geo_df.iloc[:,0]:
 
     parts = str(row).split(",")
 
-if len(parts) < 10:
-    continue
-
-zone = parts[1]
-coords = []
-
-for i in range(5, len(parts), 2):
-    try:
-        lon = float(parts[i])
-        lat = float(parts[i+1])
-
-        # ignore bad coordinates
-        if lon == 0 or lat == 0:
-            continue
-        if abs(lat) > 90 or abs(lon) > 180:
-            continue
-
-        coords.append((lon, lat))
-
-    except:
+    if len(parts) < 10:
         continue
 
-# polygon creation must be AFTER the loop
-if len(coords) >= 3:
-    polygons.append({
-        "zone": zone,
-        "polygon": Polygon(coords)
-    })
+    zone = parts[1]
+    coords = []
+
+    for i in range(5, len(parts), 2):
+        try:
+            lon = float(parts[i])
+            lat = float(parts[i+1])
+
+            # ignore bad coordinates
+            if lon == 0 or lat == 0:
+                continue
+
+            if abs(lat) > 90 or abs(lon) > 180:
+                continue
+
+            coords.append((lon, lat))
+
+        except:
+            continue
+
+    # polygon creation must be AFTER the loop
+    if len(coords) >= 3:
+        polygons.append({
+            "zone": zone,
+            "polygon": Polygon(coords)
+        })
 # Count infringements
 for poly in polygons:
 
@@ -184,5 +188,6 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
