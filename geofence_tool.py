@@ -44,25 +44,33 @@ for row in geo_df.iloc[:,0]:
     if len(parts) < 10:
         continue
 
-    zone = parts[1]
+   zone = parts[1]
 
-    coords = []
+coords = []
 
-    for i in range(5, len(parts), 2):
+for i in range(5, len(parts), 2):
+    try:
+        lon = float(parts[i])
+        lat = float(parts[i+1])
 
-        try:
-            lon = float(parts[i])
-            lat = float(parts[i+1])
-            coords.append((lon,lat))
-        except:
-            break
+        # ignore bad coordinates
+        if lon == 0 or lat == 0:
+            continue
+        if abs(lat) > 90 or abs(lon) > 180:
+            continue
 
-    if len(coords) >= 3:
+        coords.append((lon, lat))
 
-        polygons.append({
-            "zone": zone,
-            "polygon": Polygon(coords)
-        })
+    except:
+        continue
+
+
+# polygon creation must be AFTER the loop
+if len(coords) >= 3:
+    polygons.append({
+        "zone": zone,
+        "polygon": Polygon(coords)
+    })
 
 # Count infringements
 for poly in polygons:
@@ -177,4 +185,5 @@ st.download_button(
     "Download Zone Counts CSV",
     results_table.to_csv(index=False),
     "zone_counts.csv"
+
 )
