@@ -39,7 +39,7 @@ polygons = []
 
 for row in geo_df.iloc[:,0]:
 
-    parts = str(row).split(",")
+    parts = str(row).replace('"','').split(",")
 
     if len(parts) < 10:
         continue
@@ -196,6 +196,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
