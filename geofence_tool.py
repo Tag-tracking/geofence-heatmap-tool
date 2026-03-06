@@ -62,7 +62,7 @@ for row in geo_df.iloc[:,0]:
             if abs(lat) > 90 or abs(lon) > 180:
                 continue
 
-            coords.append((lon, lat))
+            coords.append((lat, lon))
 
         except:
             continue
@@ -188,6 +188,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
