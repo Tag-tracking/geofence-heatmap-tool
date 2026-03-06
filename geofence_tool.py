@@ -47,28 +47,39 @@ for row in geo_lines:
         continue
 
     zone = parts[1]
+    coords = []
 
-coords = []
+    i = 5
 
-i = 5
+    while i < len(parts) - 1:
 
-while i < len(parts) - 1:
+        try:
+            lon = float(parts[i])
+            lat = float(parts[i+1])
 
-    try:
-        lon = float(parts[i])
-        lat = float(parts[i+1])
+            if abs(lat) > 90 or abs(lon) > 180:
+                break
 
-        # stop when metadata begins
-        if lat < 20 or lat > 60:
+            coords.append((lon, lat))
+
+        except:
             break
 
-        coords.append((lon, lat))
+        i += 2
 
-    except:
-        break
+    coords = list(dict.fromkeys(coords))
 
-    i += 2
+    if len(coords) >= 3:
+        try:
+            poly = Polygon(coords)
 
+            if poly.is_valid:
+                polygons.append({
+                    "zone": zone,
+                    "polygon": poly
+                })
+        except:
+            pass
     # remove duplicate points
     coords = list(dict.fromkeys(coords))
 
@@ -201,6 +212,7 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
 
 
