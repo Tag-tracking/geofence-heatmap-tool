@@ -19,11 +19,10 @@ show_zones = st.checkbox("Show Geofences", True)
 if not points_file or not geo_file:
     st.stop()
 
+# Load heatmap data
 points_df = pd.read_csv(points_file)
-geo_df = pd.read_csv(geo_file, header=None)
-geo_df = geo_df.astype(str)
 
-# Detect lat/lon columns
+# Detect latitude / longitude columns
 lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
 lon_col = [c for c in points_df.columns if "lon" in c.lower()][0]
 
@@ -35,12 +34,14 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     except:
         pass
 
-# Parse geofences
+# Read geofence file as raw text
+geo_lines = geo_file.getvalue().decode("utf-8").splitlines()
+
 polygons = []
 
-for row in geo_df.iloc[:,0]:
+for row in geo_lines:
 
-    parts = str(row).replace('"','').split(",")
+    parts = row.replace('"','').split(",")
 
     if len(parts) < 10:
         continue
@@ -49,18 +50,19 @@ for row in geo_df.iloc[:,0]:
     coords = []
 
     i = 5
-    while i < len(parts)-1:
+    while i < len(parts) - 1:
 
         try:
             lon = float(parts[i])
             lat = float(parts[i+1])
 
-            # skip clearly invalid points
-            if lon == 0 and lat == 0:
+            # ignore impossible coordinates
+            if abs(lat) > 90 or abs(lon) > 180:
                 i += 2
                 continue
 
-            if abs(lat) > 90 or abs(lon) > 180:
+            # ignore zero coords
+            if lat == 0 and lon == 0:
                 i += 2
                 continue
 
@@ -71,10 +73,10 @@ for row in geo_df.iloc[:,0]:
 
         i += 2
 
-    # create polygon only if valid
     if len(coords) >= 3:
         try:
             poly = Polygon(coords)
+
             if poly.is_valid:
                 polygons.append({
                     "zone": zone,
@@ -82,6 +84,8 @@ for row in geo_df.iloc[:,0]:
                 })
         except:
             pass
+
+
 # Count infringements
 for poly in polygons:
 
@@ -92,6 +96,7 @@ for poly in polygons:
             count += 1
 
     poly["count"] = count
+
 
 results = pd.DataFrame(polygons)
 
@@ -105,6 +110,7 @@ results_table = results[["zone","count"]].sort_values(
     "count",
     ascending=False
 ).reset_index(drop=True)
+
 
 selected_zone = st.selectbox(
     "Highlight a zone",
@@ -138,7 +144,7 @@ if show_heatmap:
         except:
             pass
 
-    if len(heat_data) > 0:
+    if heat_data:
 
         HeatMap(
             heat_data,
@@ -147,7 +153,8 @@ if show_heatmap:
             min_opacity=0.5
         ).add_to(m)
 
-# Draw polygons
+
+# Draw geofences
 if show_zones:
 
     for poly in polygons:
@@ -171,11 +178,12 @@ if show_zones:
         c = poly["polygon"].centroid
 
         folium.Marker(
-            [c.y,c.x],
+            [c.y, c.x],
             icon=folium.DivIcon(
                 html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
             )
         ).add_to(m)
+
 
 # Render map
 st.subheader("Map")
@@ -195,21 +203,4 @@ st.download_button(
     "Download Zone Counts CSV",
     results_table.to_csv(index=False),
     "zone_counts.csv"
-
 )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
