@@ -51,7 +51,7 @@ for row in geo_lines:
     coords = []
 
     # Extract coordinate pairs safely
-    for i in range(5, len(parts)-1, 2):
+    for i in range(6, len(parts)-1, 2):
 
         try:
             lon = float(parts[i])
@@ -199,5 +199,6 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
 
