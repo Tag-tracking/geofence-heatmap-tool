@@ -50,24 +50,25 @@ for row in geo_df.iloc[:,0]:
     zone = parts[1]
     coords = []
 
+    # read coordinate pairs
     for i in range(5, len(parts), 2):
         try:
             lon = float(parts[i])
             lat = float(parts[i+1])
 
-            # ignore bad coordinates
+            # ignore invalid coordinates
             if lon == 0 or lat == 0:
                 continue
-
             if abs(lat) > 90 or abs(lon) > 180:
                 continue
 
+            # folium expects lat, lon
             coords.append((lat, lon))
 
         except:
             continue
 
-    # polygon creation must be AFTER the loop
+    # only create valid polygons
     if len(coords) >= 3:
         polygons.append({
             "zone": zone,
@@ -188,6 +189,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
