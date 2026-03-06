@@ -50,19 +50,20 @@ for row in geo_df.iloc[:,0]:
     zone = parts[1]
     coords = []
 
-    # read coordinate pairs
     for i in range(5, len(parts), 2):
+
         try:
             lon = float(parts[i])
             lat = float(parts[i+1])
 
-            # ignore invalid coordinates
+            # ignore bad coordinates
             if lon == 0 or lat == 0:
                 continue
+
             if abs(lat) > 90 or abs(lon) > 180:
                 continue
 
-            # folium expects lat, lon
+            # folium uses lat, lon order
             coords.append((lat, lon))
 
         except:
@@ -189,6 +190,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
