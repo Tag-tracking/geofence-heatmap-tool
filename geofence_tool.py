@@ -37,9 +37,6 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
 # Parse geofences
 polygons = []
 
-# Parse geofences
-polygons = []
-
 for row in geo_df.iloc[:,0]:
 
     parts = str(row).split(",")
@@ -56,24 +53,24 @@ for row in geo_df.iloc[:,0]:
             lon = float(parts[i])
             lat = float(parts[i+1])
 
-            # ignore bad coordinates
+            # skip invalid coordinates
             if lon == 0 or lat == 0:
                 continue
 
             if abs(lat) > 90 or abs(lon) > 180:
                 continue
 
-            # folium uses lat, lon order
+            # IMPORTANT: folium expects lat, lon order
             coords.append((lat, lon))
 
         except:
             continue
 
-    # only create valid polygons
+    # Only create valid polygons
     if len(coords) >= 3:
         polygons.append({
             "zone": zone,
-            "polygon": Polygon(coords)
+            "polygon": Polygon([(lon, lat) for lat, lon in coords])
         })
 # Count infringements
 for poly in polygons:
@@ -190,6 +187,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
