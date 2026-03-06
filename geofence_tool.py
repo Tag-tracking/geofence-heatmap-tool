@@ -154,7 +154,7 @@ if show_zones:
 
     for poly in polygons:
 
-        coords = [(lat, lon) for lon, lat in poly["polygon"].exterior.coords]
+        coords = [(p[1], p[0]) for p in poly["polygon"].exterior.coords]
 
         if poly["zone"] == selected_zone:
             color = "yellow"
@@ -199,4 +199,5 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
