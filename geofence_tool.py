@@ -48,7 +48,7 @@ for row in geo_lines:
 
     zone = parts[1]
 
-  coords = []
+coords = []
 
 i = 5
 
@@ -201,6 +201,7 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
 
 
