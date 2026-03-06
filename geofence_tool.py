@@ -63,7 +63,7 @@ for row in geo_df.iloc[:,0]:
                 i += 2
                 continue
 
-            coords.append((lat, lon))
+            coords.append((lon, lat))
 
         except:
             pass
@@ -151,7 +151,7 @@ if show_zones:
 
     for poly in polygons:
 
-        coords = [(lat,lon) for lon,lat in poly["polygon"].exterior.coords]
+        coords = [(lat, lon) for lon, lat in poly["polygon"].exterior.coords]
 
         if poly["zone"] == selected_zone:
             color = "yellow"
@@ -196,6 +196,7 @@ st.download_button(
     "zone_counts.csv"
 
 )
+
 
 
 
