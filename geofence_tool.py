@@ -50,26 +50,26 @@ for row in geo_lines:
 
     coords = []
 
-i = 6
+    i = 6
 
-while i < len(parts) - 1:
+    while i < len(parts) - 1:
 
-    try:
-        lon = float(parts[i])
-        lat = float(parts[i+1])
+        try:
+            lon = float(parts[i])
+            lat = float(parts[i+1])
 
-        # stop when metadata begins
-        if abs(lat) > 90 or abs(lon) > 180:
+            # stop if metadata begins
+            if abs(lat) > 90 or abs(lon) > 180:
+                break
+
+            coords.append((lon, lat))
+
+        except:
             break
 
-        coords.append((lon, lat))
+        i += 2
 
-    except:
-        break
-
-    i += 2
-
-    # Remove duplicates that appear in GTPEO exports
+    # remove duplicate points
     coords = list(dict.fromkeys(coords))
 
     if len(coords) >= 3:
@@ -83,7 +83,6 @@ while i < len(parts) - 1:
                 })
         except:
             pass
-
 # Count infringements
 for poly in polygons:
 
@@ -202,6 +201,7 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
 
 
