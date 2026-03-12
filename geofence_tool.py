@@ -38,9 +38,6 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
 
 # -----------------------------
 # LOAD GEOFENCE CSV
-# New format:
-# Column A = zone name
-# Column B onward = lon,lat pairs
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
@@ -50,7 +47,6 @@ polygons = []
 for _, row in geo_df.iterrows():
 
     zone = str(row.iloc[0]).strip()
-
     coords = []
 
     values = row.iloc[1:].dropna().values
@@ -69,10 +65,8 @@ for _, row in geo_df.iterrows():
         except:
             continue
 
-    # remove duplicate coordinates
     coords = list(dict.fromkeys(coords))
 
-    # ensure polygon closes
     if len(coords) >= 3:
 
         if coords[0] != coords[-1]:
@@ -92,19 +86,34 @@ for _, row in geo_df.iterrows():
             pass
 
 # -----------------------------
-# COUNT POINTS INSIDE ZONES
+# PROXIMITY ANALYSIS
 # -----------------------------
+
+BUFFER_METERS = 5
+BUFFER_DEGREES = BUFFER_METERS / 111320
 
 for poly in polygons:
 
-    count = 0
+    inside_count = 0
+    near_count = 0
+
+    buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
 
     for p in points:
+
         if poly["polygon"].contains(p):
-            count += 1
+            inside_count += 1
 
-    poly["count"] = count
+        elif buffer_poly.contains(p):
+            near_count += 1
 
+    poly["count"] = inside_count
+    poly["near_count"] = near_count
+    poly["buffer"] = buffer_poly
+
+# -----------------------------
+# RESULTS TABLE
+# -----------------------------
 
 results = pd.DataFrame(polygons)
 
@@ -114,18 +123,40 @@ if len(results) == 0:
 
 results["zone"] = results["zone"].astype(str)
 
-results_table = results[["zone", "count"]].sort_values(
-    "count",
-    ascending=False
-).reset_index(drop=True)
+# -----------------------------
+# ZONE VISIBILITY CONTROLS
+# -----------------------------
+
+all_zones = list(results["zone"].unique())
+
+if "visible_zones" not in st.session_state:
+    st.session_state.visible_zones = all_zones
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("Select All"):
+        st.session_state.visible_zones = all_zones
+
+with col2:
+    if st.button("Clear All"):
+        st.session_state.visible_zones = []
+
+visible_zones = st.multiselect(
+    "Select geofences to display",
+    options=all_zones,
+    default=st.session_state.visible_zones
+)
+
+st.session_state.visible_zones = visible_zones
 
 # -----------------------------
-# ZONE SELECTOR
+# ZONE HIGHLIGHT
 # -----------------------------
 
 selected_zone = st.selectbox(
     "Highlight a zone",
-    results_table["zone"]
+    visible_zones if visible_zones else ["None"]
 )
 
 # -----------------------------
@@ -140,7 +171,6 @@ m = folium.Map(
     zoom_start=16
 )
 
-# Satellite imagery
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attr="Esri",
@@ -178,6 +208,9 @@ if show_zones:
 
     for poly in polygons:
 
+        if poly["zone"] not in visible_zones:
+            continue
+
         coords = [(p[1], p[0]) for p in poly["polygon"].exterior.coords]
 
         if poly["zone"] == selected_zone:
@@ -194,12 +227,31 @@ if show_zones:
             fill=False
         ).add_to(m)
 
+        # dashed proximity boundary
+        buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
+
+        folium.PolyLine(
+            buffer_coords,
+            color="orange",
+            weight=2,
+            dash_array="6,6"
+        ).add_to(m)
+
         c = poly["polygon"].centroid
 
+        # main geofence count
         folium.Marker(
             [c.y, c.x],
             icon=folium.DivIcon(
                 html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
+            )
+        ).add_to(m)
+
+        # proximity count
+        folium.Marker(
+            [c.y + 0.00003, c.x],
+            icon=folium.DivIcon(
+                html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
             )
         ).add_to(m)
 
@@ -217,6 +269,11 @@ components.html(
 # -----------------------------
 # RESULTS TABLE
 # -----------------------------
+
+results_table = results[results["zone"].isin(visible_zones)][["zone", "count"]].sort_values(
+    "count",
+    ascending=False
+).reset_index(drop=True)
 
 st.subheader("Zone Infringement Ranking")
 
