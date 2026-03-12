@@ -19,82 +19,82 @@ show_zones = st.checkbox("Show Geofences", True)
 if not points_file or not geo_file:
     st.stop()
 
-# Load heatmap data
+# -----------------------------
+# LOAD HEATMAP DATA
+# -----------------------------
+
 points_df = pd.read_csv(points_file)
 
-# Detect latitude / longitude columns
 lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
 lon_col = [c for c in points_df.columns if "lon" in c.lower()][0]
 
-# Build shapely points
 points = []
+
 for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     try:
         points.append(Point(float(lon), float(lat)))
     except:
         pass
 
-# Read geofence file
-geo_lines = geo_file.getvalue().decode("utf-8").splitlines()
+# -----------------------------
+# LOAD GEOFENCE CSV
+# New format:
+# Column A = zone name
+# Column B onward = lon,lat pairs
+# -----------------------------
+
+geo_df = pd.read_csv(geo_file)
 
 polygons = []
 
-for row in geo_lines:
+for _, row in geo_df.iterrows():
 
-    parts = row.replace('"','').split(",")
+    zone = str(row.iloc[0]).strip()
 
-    if len(parts) < 10:
-        continue
-
-    zone = parts[1]
     coords = []
 
-    i = 5
+    values = row.iloc[1:].dropna().values
 
-    while i < len(parts) - 1:
+    for i in range(0, len(values) - 1, 2):
 
         try:
-            lon = float(parts[i])
-            lat = float(parts[i+1])
+            lon = float(values[i])
+            lat = float(values[i + 1])
 
             if abs(lat) > 90 or abs(lon) > 180:
-                break
+                continue
 
             coords.append((lon, lat))
 
         except:
-            break
+            continue
 
-        i += 2
-
+    # remove duplicate coordinates
     coords = list(dict.fromkeys(coords))
 
+    # ensure polygon closes
     if len(coords) >= 3:
+
+        if coords[0] != coords[-1]:
+            coords.append(coords[0])
+
         try:
             poly = Polygon(coords)
 
             if poly.is_valid:
+
                 polygons.append({
                     "zone": zone,
                     "polygon": poly
                 })
+
         except:
             pass
-    # remove duplicate points
-    coords = list(dict.fromkeys(coords))
 
-    if len(coords) >= 3:
-        try:
-            poly = Polygon(coords)
+# -----------------------------
+# COUNT POINTS INSIDE ZONES
+# -----------------------------
 
-            if poly.is_valid:
-                polygons.append({
-                    "zone": zone,
-                    "polygon": poly
-                })
-        except:
-            pass
-# Count infringements
 for poly in polygons:
 
     count = 0
@@ -108,32 +108,35 @@ for poly in polygons:
 
 results = pd.DataFrame(polygons)
 
-# Remove duplicate zones created by GTPEO coordinate repetition
-results = results.drop_duplicates(subset="zone")
-
 if len(results) == 0:
     st.error("No geofences detected in file.")
     st.stop()
 
 results["zone"] = results["zone"].astype(str)
 
-results_table = results[["zone","count"]].sort_values(
+results_table = results[["zone", "count"]].sort_values(
     "count",
     ascending=False
 ).reset_index(drop=True)
 
+# -----------------------------
+# ZONE SELECTOR
+# -----------------------------
 
 selected_zone = st.selectbox(
     "Highlight a zone",
     results_table["zone"]
 )
 
-# Map center
+# -----------------------------
+# MAP
+# -----------------------------
+
 center_lat = points_df[lat_col].mean()
 center_lon = points_df[lon_col].mean()
 
 m = folium.Map(
-    location=[center_lat,center_lon],
+    location=[center_lat, center_lon],
     zoom_start=16
 )
 
@@ -144,7 +147,10 @@ folium.TileLayer(
     name="Satellite"
 ).add_to(m)
 
-# Heatmap
+# -----------------------------
+# HEATMAP
+# -----------------------------
+
 if show_heatmap:
 
     heat_data = []
@@ -164,8 +170,10 @@ if show_heatmap:
             min_opacity=0.5
         ).add_to(m)
 
+# -----------------------------
+# DRAW GEOFENCES
+# -----------------------------
 
-# Draw geofences
 if show_zones:
 
     for poly in polygons:
@@ -195,8 +203,10 @@ if show_zones:
             )
         ).add_to(m)
 
+# -----------------------------
+# RENDER MAP
+# -----------------------------
 
-# Render map
 st.subheader("Map")
 
 components.html(
@@ -204,23 +214,20 @@ components.html(
     height=650
 )
 
-# Table
+# -----------------------------
+# RESULTS TABLE
+# -----------------------------
+
 st.subheader("Zone Infringement Ranking")
 
 st.dataframe(results_table, use_container_width=True)
 
-# Download CSV
+# -----------------------------
+# DOWNLOAD RESULTS
+# -----------------------------
+
 st.download_button(
     "Download Zone Counts CSV",
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
-
-
-
-
-
-
-
-
-
