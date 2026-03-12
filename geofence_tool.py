@@ -104,15 +104,17 @@ def compute_stats(_polygons, _points):
 
         buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
 
-        candidates = tree.query(buffer_poly)
+        candidate_indexes = tree.query(buffer_poly)
 
-        for p in candidates:
+for idx in candidate_indexes:
 
-            if poly["polygon"].contains(p):
-                inside_count += 1
+    p = _points[idx]
 
-            elif buffer_poly.contains(p):
-                near_count += 1
+    if poly["polygon"].contains(p):
+        inside_count += 1
+
+    elif buffer_poly.contains(p):
+        near_count += 1
 
         poly["count"] = inside_count
         poly["near_count"] = near_count
@@ -324,4 +326,5 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
 
