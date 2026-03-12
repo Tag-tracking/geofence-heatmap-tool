@@ -40,6 +40,7 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     except:
         pass
 
+
 # -----------------------------
 # LOAD GEOFENCE CSV
 # -----------------------------
@@ -234,22 +235,15 @@ if show_zones:
             color = "red"
             weight = 3
 
-        popup_html = f"""
-        <b>Zone:</b> {poly['zone']}<br>
-        <b>Inside fixes:</b> {poly['count']}<br>
-        <b>Within 5m:</b> {poly['near_count']}<br>
-        <i>Toggle visibility using the dropdown above.</i>
-        """
-
+        # draw geofence
         folium.Polygon(
             coords,
             color=color,
             weight=weight,
-            fill=False,
-            popup=folium.Popup(popup_html, max_width=250)
+            fill=False
         ).add_to(m)
 
-        # proximity dashed boundary
+        # dashed proximity boundary
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -261,15 +255,22 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        # main geofence count marker
+        popup_html = f"""
+        <b>Zone:</b> {poly['zone']}<br>
+        <b>Inside fixes:</b> {poly['count']}<br>
+        <b>Within 5m:</b> {poly['near_count']}
+        """
+
+        # main count marker (clickable popup)
         folium.Marker(
             [c.y, c.x],
+            popup=folium.Popup(popup_html, max_width=250),
             icon=folium.DivIcon(
                 html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
             )
         ).add_to(m)
 
-        # proximity count marker (offset so markers do not overlap)
+        # proximity marker
         folium.Marker(
             [c.y + 0.00006, c.x],
             icon=folium.DivIcon(
