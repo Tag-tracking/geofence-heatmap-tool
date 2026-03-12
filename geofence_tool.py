@@ -94,7 +94,6 @@ for _, row in geo_df.iterrows():
 # FAST PROXIMITY ANALYSIS
 # -----------------------------
 
-@st.cache_data
 def compute_stats(_polygons, _points):
 
     BUFFER_METERS = 5
@@ -311,3 +310,4 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
