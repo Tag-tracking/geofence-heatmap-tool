@@ -239,12 +239,20 @@ if show_zones:
             color = "red"
             weight = 3
 
-        folium.Polygon(
-            coords,
-            color=color,
-            weight=weight,
-            fill=False
-        ).add_to(m)
+       popup_html = f"""
+<b>Zone:</b> {poly['zone']}<br>
+<b>Inside fixes:</b> {poly['count']}<br>
+<b>Within 5m:</b> {poly['near_count']}<br><br>
+<i>Use the dropdown above to hide/show this geofence.</i>
+"""
+
+folium.Polygon(
+    coords,
+    color=color,
+    weight=weight,
+    fill=False,
+    popup=folium.Popup(popup_html, max_width=250)
+).add_to(m)
 
         # proximity dashed boundary
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
@@ -310,3 +318,4 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
