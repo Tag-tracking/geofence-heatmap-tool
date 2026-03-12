@@ -37,6 +37,7 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     except:
         pass
 
+
 # -----------------------------
 # LOAD GEOFENCE CSV
 # -----------------------------
@@ -77,6 +78,7 @@ for _, row in geo_df.iterrows():
             poly = Polygon(coords)
 
             if poly.is_valid:
+
                 polygons.append({
                     "zone": zone,
                     "polygon": poly
@@ -84,6 +86,7 @@ for _, row in geo_df.iterrows():
 
         except:
             pass
+
 
 # -----------------------------
 # FAST PROXIMITY ANALYSIS
@@ -106,37 +109,9 @@ def compute_stats(_polygons, _points):
 
         candidate_indexes = tree.query(buffer_poly)
 
-for idx in candidate_indexes:
+        for idx in candidate_indexes:
 
-    p = _points[idx]
-
-    if poly["polygon"].contains(p):
-        inside_count += 1
-
-    elif buffer_poly.contains(p):
-        near_count += 1
-
-        poly["count"] = inside_count
-        poly["near_count"] = near_count
-        poly["buffer"] = buffer_poly
-
-    return _polygons
-
-    BUFFER_METERS = 5
-    BUFFER_DEGREES = BUFFER_METERS / 111320
-
-    tree = STRtree(points)
-
-    for poly in polygons:
-
-        inside_count = 0
-        near_count = 0
-
-        buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
-
-        candidates = tree.query(buffer_poly)
-
-        for p in candidates:
+            p = _points[idx]
 
             if poly["polygon"].contains(p):
                 inside_count += 1
@@ -148,10 +123,11 @@ for idx in candidate_indexes:
         poly["near_count"] = near_count
         poly["buffer"] = buffer_poly
 
-    return polygons
+    return _polygons
 
 
 polygons = compute_stats(polygons, points)
+
 
 # -----------------------------
 # RESULTS TABLE
@@ -164,6 +140,7 @@ if len(results) == 0:
     st.stop()
 
 results["zone"] = results["zone"].astype(str)
+
 
 # -----------------------------
 # ZONE VISIBILITY CONTROLS
@@ -188,6 +165,7 @@ visible_zones = st.multiselect(
     key="visible_zones"
 )
 
+
 # -----------------------------
 # ZONE HIGHLIGHT
 # -----------------------------
@@ -196,6 +174,7 @@ selected_zone = st.selectbox(
     "Highlight a zone",
     visible_zones if visible_zones else ["None"]
 )
+
 
 # -----------------------------
 # MAP
@@ -214,6 +193,7 @@ folium.TileLayer(
     attr="Esri",
     name="Satellite"
 ).add_to(m)
+
 
 # -----------------------------
 # HEATMAP
@@ -237,6 +217,7 @@ if show_heatmap:
             blur=15,
             min_opacity=0.5
         ).add_to(m)
+
 
 # -----------------------------
 # DRAW GEOFENCES
@@ -277,7 +258,7 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        # geofence count marker
+        # main geofence count
         folium.Marker(
             [c.y, c.x],
             icon=folium.DivIcon(
@@ -285,13 +266,14 @@ if show_zones:
             )
         ).add_to(m)
 
-        # proximity count marker (offset slightly further so numbers don't overlap)
+        # proximity count marker (offset to avoid overlap)
         folium.Marker(
             [c.y + 0.00006, c.x],
             icon=folium.DivIcon(
                 html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
             )
         ).add_to(m)
+
 
 # -----------------------------
 # RENDER MAP
@@ -303,6 +285,7 @@ components.html(
     m._repr_html_(),
     height=650
 )
+
 
 # -----------------------------
 # RESULTS TABLE
@@ -317,6 +300,7 @@ st.subheader("Zone Infringement Ranking")
 
 st.dataframe(results_table, use_container_width=True)
 
+
 # -----------------------------
 # DOWNLOAD RESULTS
 # -----------------------------
@@ -326,5 +310,3 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
-
-
