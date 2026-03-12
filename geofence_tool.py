@@ -10,7 +10,10 @@ st.set_page_config(layout="wide")
 
 st.title("Geofence Heatmap Analyzer")
 
-# Upload files
+# -----------------------------
+# FILE UPLOAD
+# -----------------------------
+
 points_file = st.file_uploader("Upload Heatmap CSV")
 geo_file = st.file_uploader("Upload Geofence CSV")
 
@@ -36,7 +39,6 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
         points.append(Point(float(lon), float(lat)))
     except:
         pass
-
 
 # -----------------------------
 # LOAD GEOFENCE CSV
@@ -78,7 +80,6 @@ for _, row in geo_df.iterrows():
             poly = Polygon(coords)
 
             if poly.is_valid:
-
                 polygons.append({
                     "zone": zone,
                     "polygon": poly
@@ -128,7 +129,6 @@ def compute_stats(_polygons, _points):
 
 polygons = compute_stats(polygons, points)
 
-
 # -----------------------------
 # RESULTS TABLE
 # -----------------------------
@@ -140,7 +140,6 @@ if len(results) == 0:
     st.stop()
 
 results["zone"] = results["zone"].astype(str)
-
 
 # -----------------------------
 # ZONE VISIBILITY CONTROLS
@@ -165,7 +164,6 @@ visible_zones = st.multiselect(
     key="visible_zones"
 )
 
-
 # -----------------------------
 # ZONE HIGHLIGHT
 # -----------------------------
@@ -175,9 +173,8 @@ selected_zone = st.selectbox(
     visible_zones if visible_zones else ["None"]
 )
 
-
 # -----------------------------
-# MAP
+# MAP SETUP
 # -----------------------------
 
 center_lat = points_df[lat_col].mean()
@@ -193,7 +190,6 @@ folium.TileLayer(
     attr="Esri",
     name="Satellite"
 ).add_to(m)
-
 
 # -----------------------------
 # HEATMAP
@@ -218,7 +214,6 @@ if show_heatmap:
             min_opacity=0.5
         ).add_to(m)
 
-
 # -----------------------------
 # DRAW GEOFENCES
 # -----------------------------
@@ -239,20 +234,20 @@ if show_zones:
             color = "red"
             weight = 3
 
-       popup_html = f"""
-<b>Zone:</b> {poly['zone']}<br>
-<b>Inside fixes:</b> {poly['count']}<br>
-<b>Within 5m:</b> {poly['near_count']}<br><br>
-<i>Use the dropdown above to hide/show this geofence.</i>
-"""
+        popup_html = f"""
+        <b>Zone:</b> {poly['zone']}<br>
+        <b>Inside fixes:</b> {poly['count']}<br>
+        <b>Within 5m:</b> {poly['near_count']}<br>
+        <i>Toggle visibility using the dropdown above.</i>
+        """
 
-folium.Polygon(
-    coords,
-    color=color,
-    weight=weight,
-    fill=False,
-    popup=folium.Popup(popup_html, max_width=250)
-).add_to(m)
+        folium.Polygon(
+            coords,
+            color=color,
+            weight=weight,
+            fill=False,
+            popup=folium.Popup(popup_html, max_width=250)
+        ).add_to(m)
 
         # proximity dashed boundary
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
@@ -266,7 +261,7 @@ folium.Polygon(
 
         c = poly["polygon"].centroid
 
-        # main geofence count
+        # main geofence count marker
         folium.Marker(
             [c.y, c.x],
             icon=folium.DivIcon(
@@ -274,14 +269,13 @@ folium.Polygon(
             )
         ).add_to(m)
 
-        # proximity count marker (offset to avoid overlap)
+        # proximity count marker (offset so markers do not overlap)
         folium.Marker(
             [c.y + 0.00006, c.x],
             icon=folium.DivIcon(
                 html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
             )
         ).add_to(m)
-
 
 # -----------------------------
 # RENDER MAP
@@ -293,7 +287,6 @@ components.html(
     m._repr_html_(),
     height=650
 )
-
 
 # -----------------------------
 # RESULTS TABLE
@@ -308,7 +301,6 @@ st.subheader("Zone Infringement Ranking")
 
 st.dataframe(results_table, use_container_width=True)
 
-
 # -----------------------------
 # DOWNLOAD RESULTS
 # -----------------------------
@@ -318,4 +310,3 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
-
