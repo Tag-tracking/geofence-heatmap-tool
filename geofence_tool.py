@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import folium
 from shapely.geometry import Point, Polygon
+from shapely.strtree import STRtree
 from folium.plugins import HeatMap
 import streamlit.components.v1 as components
 
@@ -76,7 +77,6 @@ for _, row in geo_df.iterrows():
             poly = Polygon(coords)
 
             if poly.is_valid:
-
                 polygons.append({
                     "zone": zone,
                     "polygon": poly
@@ -86,30 +86,42 @@ for _, row in geo_df.iterrows():
             pass
 
 # -----------------------------
-# PROXIMITY ANALYSIS
+# FAST PROXIMITY ANALYSIS
 # -----------------------------
 
-BUFFER_METERS = 5
-BUFFER_DEGREES = BUFFER_METERS / 111320
+@st.cache_data
+def compute_stats(polygons, points):
 
-for poly in polygons:
+    BUFFER_METERS = 5
+    BUFFER_DEGREES = BUFFER_METERS / 111320
 
-    inside_count = 0
-    near_count = 0
+    tree = STRtree(points)
 
-    buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
+    for poly in polygons:
 
-    for p in points:
+        inside_count = 0
+        near_count = 0
 
-        if poly["polygon"].contains(p):
-            inside_count += 1
+        buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
 
-        elif buffer_poly.contains(p):
-            near_count += 1
+        candidates = tree.query(buffer_poly)
 
-    poly["count"] = inside_count
-    poly["near_count"] = near_count
-    poly["buffer"] = buffer_poly
+        for p in candidates:
+
+            if poly["polygon"].contains(p):
+                inside_count += 1
+
+            elif buffer_poly.contains(p):
+                near_count += 1
+
+        poly["count"] = inside_count
+        poly["near_count"] = near_count
+        poly["buffer"] = buffer_poly
+
+    return polygons
+
+
+polygons = compute_stats(polygons, points)
 
 # -----------------------------
 # RESULTS TABLE
@@ -134,21 +146,17 @@ if "visible_zones" not in st.session_state:
 
 col1, col2 = st.columns(2)
 
-with col1:
-    if st.button("Select All"):
-        st.session_state.visible_zones = all_zones
+if col1.button("Select All"):
+    st.session_state.visible_zones = all_zones
 
-with col2:
-    if st.button("Clear All"):
-        st.session_state.visible_zones = []
+if col2.button("Clear All"):
+    st.session_state.visible_zones = []
 
 visible_zones = st.multiselect(
     "Select geofences to display",
     options=all_zones,
-    default=st.session_state.visible_zones
+    key="visible_zones"
 )
-
-st.session_state.visible_zones = visible_zones
 
 # -----------------------------
 # ZONE HIGHLIGHT
@@ -227,7 +235,7 @@ if show_zones:
             fill=False
         ).add_to(m)
 
-        # dashed proximity boundary
+        # proximity dashed boundary
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -239,7 +247,7 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        # main geofence count
+        # geofence count marker
         folium.Marker(
             [c.y, c.x],
             icon=folium.DivIcon(
@@ -247,9 +255,9 @@ if show_zones:
             )
         ).add_to(m)
 
-        # proximity count
+        # proximity count marker (offset slightly further so numbers don't overlap)
         folium.Marker(
-            [c.y + 0.00003, c.x],
+            [c.y + 0.00006, c.x],
             icon=folium.DivIcon(
                 html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
             )
