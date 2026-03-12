@@ -90,7 +90,35 @@ for _, row in geo_df.iterrows():
 # -----------------------------
 
 @st.cache_data
-def compute_stats(polygons, points):
+def compute_stats(_polygons, _points):
+
+    BUFFER_METERS = 5
+    BUFFER_DEGREES = BUFFER_METERS / 111320
+
+    tree = STRtree(_points)
+
+    for poly in _polygons:
+
+        inside_count = 0
+        near_count = 0
+
+        buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
+
+        candidates = tree.query(buffer_poly)
+
+        for p in candidates:
+
+            if poly["polygon"].contains(p):
+                inside_count += 1
+
+            elif buffer_poly.contains(p):
+                near_count += 1
+
+        poly["count"] = inside_count
+        poly["near_count"] = near_count
+        poly["buffer"] = buffer_poly
+
+    return _polygons
 
     BUFFER_METERS = 5
     BUFFER_DEGREES = BUFFER_METERS / 111320
@@ -296,3 +324,4 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
+
