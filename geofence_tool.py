@@ -83,34 +83,29 @@ for _, row in geo_df.iterrows():
     coords_lonlat = build_coords(values, "lonlat")
 
     best_coords = None
-    best_distance = float("inf")
 
     for coords in [coords_latlon, coords_lonlat]:
 
-        if len(coords) < 3:
+        # Require enough points
+        if len(coords) < 4:
             continue
 
+        # Close polygon if needed
         if coords[0] != coords[-1]:
             coords.append(coords[0])
 
         try:
             poly = Polygon(coords)
 
-            if not poly.is_valid:
-                continue
-
-            centroid = poly.centroid
-            dist = ((centroid.y - center_lat)**2 + (centroid.x - center_lon)**2)
-
-            if dist < best_distance:
-                best_distance = dist
+            if poly.is_valid:
                 best_coords = coords
+                break
 
         except:
             continue
 
-    # Only accept polygons near your course (~1km threshold)
-    if best_coords and best_distance < 0.01:
+    # ✅ Accept ANY valid polygon (removed distance filter)
+    if best_coords:
 
         poly = Polygon(best_coords)
 
