@@ -106,6 +106,48 @@ for _, row in geo_df.iterrows():
         continue
 
 # -----------------------------
+# SMART ALIGNMENT (SAFE)
+# -----------------------------
+
+def distance_meters(lat1, lon1, lat2, lon2):
+    return ((lat1 - lat2) * 111320) ** 2 + ((lon1 - lon2) * 111320) ** 2
+
+if heat_data and polygons:
+
+    avg_lat = sum(p[0] for p in heat_data) / len(heat_data)
+    avg_lon = sum(p[1] for p in heat_data) / len(heat_data)
+
+    geo_lat = sum(p["polygon"].centroid.y for p in polygons) / len(polygons)
+    geo_lon = sum(p["polygon"].centroid.x for p in polygons) / len(polygons)
+
+    dist = distance_meters(avg_lat, avg_lon, geo_lat, geo_lon)
+
+    st.write(f"Alignment distance: {int(dist**0.5)} meters")
+
+    if dist**0.5 > 200:
+
+        st.warning("Applying heatmap alignment (datasets were far apart)")
+
+        lat_offset = geo_lat - avg_lat
+        lon_offset = geo_lon - avg_lon
+
+        aligned_heat_data = []
+        aligned_points = []
+
+        for lat, lon in heat_data:
+            new_lat = lat + lat_offset
+            new_lon = lon + lon_offset
+
+            aligned_heat_data.append([new_lat, new_lon])
+            aligned_points.append(Point(new_lon, new_lat))
+
+        heat_data = aligned_heat_data
+        points = aligned_points
+
+    else:
+        st.success("No alignment needed (datasets already aligned)")
+
+# -----------------------------
 # PROXIMITY ANALYSIS
 # -----------------------------
 
