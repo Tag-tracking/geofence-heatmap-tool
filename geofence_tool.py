@@ -24,7 +24,7 @@ if not points_file or not geo_file:
     st.stop()
 
 # -----------------------------
-# LOAD HEATMAP DATA
+# LOAD HEATMAP DATA (ROBUST)
 # -----------------------------
 
 points_df = pd.read_csv(points_file)
@@ -33,12 +33,38 @@ lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
 lon_col = [c for c in points_df.columns if "lon" in c.lower()][0]
 
 points = []
+heat_data = []
 
-for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
+def clean_coord(val):
     try:
-        points.append(Point(float(lon), float(lat)))
+        if pd.isna(val):
+            return None
+        val = str(val).strip()
+        if val == "" or val.lower() in ["null", "none"]:
+            return None
+        return float(val)
     except:
-        pass
+        return None
+
+for lat_raw, lon_raw in zip(points_df[lat_col], points_df[lon_col]):
+
+    lat = clean_coord(lat_raw)
+    lon = clean_coord(lon_raw)
+
+    if lat is None or lon is None:
+        continue
+
+    if lat == 0 or lon == 0:
+        continue
+
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        continue
+
+    points.append(Point(lon, lat))
+    heat_data.append([lat, lon])
+
+st.write(f"Total rows: {len(points_df)}")
+st.write(f"Valid GPS points used: {len(points)}")
 
 # -----------------------------
 # LOAD GEOFENCE CSV (lon, lat)
@@ -161,11 +187,8 @@ for poly in polygons:
     bounds_list.append((b[1], b[0]))
     bounds_list.append((b[3], b[2]))
 
-for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
-    try:
-        bounds_list.append((float(lat), float(lon)))
-    except:
-        pass
+for lat, lon in heat_data:
+    bounds_list.append((lat, lon))
 
 if bounds_list:
     min_lat = min(p[0] for p in bounds_list)
@@ -198,23 +221,14 @@ folium.TileLayer(
 # HEATMAP
 # -----------------------------
 
-if show_heatmap:
+if show_heatmap and heat_data:
 
-    heat_data = []
-
-    for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
-        try:
-            heat_data.append([float(lat), float(lon)])
-        except:
-            pass
-
-    if heat_data:
-        HeatMap(
-            heat_data,
-            radius=20,
-            blur=15,
-            min_opacity=0.5
-        ).add_to(m)
+    HeatMap(
+        heat_data,
+        radius=20,
+        blur=15,
+        min_opacity=0.5
+    ).add_to(m)
 
 # -----------------------------
 # DRAW GEOFENCES
@@ -239,7 +253,6 @@ if show_zones:
             fill_opacity=0.15
         ).add_to(m)
 
-        # buffer
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -249,7 +262,6 @@ if show_zones:
             dash_array="6,6"
         ).add_to(m)
 
-        # centroid
         c = poly["polygon"].centroid
 
         popup_html = f"""
@@ -258,7 +270,6 @@ if show_zones:
         <b>Within 5m:</b> {poly['near_count']}
         """
 
-        # main marker (click + hover)
         folium.Marker(
             [c.y, c.x],
             popup=folium.Popup(popup_html, max_width=250),
@@ -268,7 +279,6 @@ if show_zones:
             )
         ).add_to(m)
 
-        # near count marker
         folium.Marker(
             [c.y + 0.00006, c.x],
             tooltip=f"Within 5m: {poly['near_count']}",
