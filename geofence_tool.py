@@ -66,11 +66,8 @@ for lat_raw, lon_raw in zip(points_df[lat_col], points_df[lon_col]):
 st.write(f"Total rows: {len(points_df)}")
 st.write(f"Valid GPS points used: {len(points)}")
 
-heat_center_lat = sum(p[0] for p in heat_data) / len(heat_data)
-heat_center_lon = sum(p[1] for p in heat_data) / len(heat_data)
-
 # -----------------------------
-# GEOFENCE AUTO-DETECTION
+# GEOFENCE AUTO-DETECTION (ROBUST)
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
@@ -118,27 +115,34 @@ def build_polygons(coord_order):
 
     return polys
 
-def avg_distance(polys):
-    if not polys:
-        return float("inf")
 
-    total = 0
-    for p in polys:
-        c = p["polygon"].centroid
-        d = ((c.y - heat_center_lat) * 111320) ** 2 + ((c.x - heat_center_lon) * 111320) ** 2
-        total += d
+def count_hits(polygons, points):
 
-    return (total / len(polys)) ** 0.5
+    count = 0
+
+    for poly in polygons:
+        for p in points:
+            if poly["polygon"].contains(p):
+                count += 1
+
+    return count
+
 
 polygons_lonlat = build_polygons("lonlat")
 polygons_latlon = build_polygons("latlon")
 
-if avg_distance(polygons_lonlat) < avg_distance(polygons_latlon):
+hits_lonlat = count_hits(polygons_lonlat, points)
+hits_latlon = count_hits(polygons_latlon, points)
+
+if hits_lonlat == 0 and hits_latlon == 0:
+    st.warning("⚠️ No GPS points intersect geofences — check dataset alignment")
+
+if hits_lonlat >= hits_latlon:
     polygons = polygons_lonlat
-    st.success("Geofence format detected: lon, lat")
+    st.success(f"Geofence format detected: lon, lat (hits: {hits_lonlat})")
 else:
     polygons = polygons_latlon
-    st.success("Geofence format detected: lat, lon")
+    st.success(f"Geofence format detected: lat, lon (hits: {hits_latlon})")
 
 # -----------------------------
 # PROXIMITY ANALYSIS
@@ -148,8 +152,6 @@ def compute_stats(polygons, points):
 
     BUFFER_METERS = 5
     BUFFER_DEGREES = BUFFER_METERS / 111320
-
-    tree = STRtree(points)
 
     for poly in polygons:
 
@@ -209,7 +211,10 @@ selected_zone = st.selectbox(
 # MAP
 # -----------------------------
 
-m = folium.Map(location=[heat_center_lat, heat_center_lon], zoom_start=16)
+center_lat = sum(p[1] for p in [(pt.y, pt.x) for pt in points]) / len(points)
+center_lon = sum(p[0] for p in [(pt.y, pt.x) for pt in points]) / len(points)
+
+m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
 
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -246,7 +251,7 @@ if show_zones:
             fill_opacity=0.15
         ).add_to(m)
 
-        # 5m buffer
+        # buffer
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -264,7 +269,7 @@ if show_zones:
         <b>Within 5m:</b> {poly['near_count']}
         """
 
-        # Inside marker (white)
+        # inside marker
         folium.Marker(
             [c.y, c.x],
             popup=popup_html,
@@ -274,7 +279,7 @@ if show_zones:
             )
         ).add_to(m)
 
-        # 🔥 5m marker (orange)
+        # 🔥 5m marker
         folium.Marker(
             [c.y + 0.00006, c.x],
             tooltip=f"Within 5m: {poly['near_count']}",
