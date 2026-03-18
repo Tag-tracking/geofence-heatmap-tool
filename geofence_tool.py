@@ -41,7 +41,7 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
         pass
 
 # -----------------------------
-# LOAD GEOFENCE CSV (YOUR FORMAT: lon, lat)
+# LOAD GEOFENCE CSV (CORRECT)
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
@@ -55,21 +55,17 @@ for _, row in geo_df.iterrows():
 
     coords = []
 
-    # ✅ Your format: lon, lat pairs
     for i in range(0, len(values) - 1, 2):
         try:
             lon = float(values[i])
             lat = float(values[i + 1])
-
             coords.append((lon, lat))
-
         except:
             continue
 
     if len(coords) < 3:
         continue
 
-    # close polygon
     if coords[0] != coords[-1]:
         coords.append(coords[0])
 
@@ -81,52 +77,125 @@ for _, row in geo_df.iterrows():
                 "zone": zone,
                 "polygon": poly
             })
-
     except:
         continue
+
+# -----------------------------
+# PROXIMITY ANALYSIS (RESTORED)
+# -----------------------------
+
+def compute_stats(_polygons, _points):
+
+    BUFFER_METERS = 5
+    BUFFER_DEGREES = BUFFER_METERS / 111320
+
+    tree = STRtree(_points)
+
+    for poly in _polygons:
+
+        inside_count = 0
+        near_count = 0
+
+        buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
+
+        candidate_indexes = tree.query(buffer_poly)
+
+        for idx in candidate_indexes:
+
+            p = _points[idx]
+
+            if poly["polygon"].contains(p):
+                inside_count += 1
+            elif buffer_poly.contains(p):
+                near_count += 1
+
+        poly["count"] = inside_count
+        poly["near_count"] = near_count
+        poly["buffer"] = buffer_poly
+
+    return _polygons
+
+polygons = compute_stats(polygons, points)
 
 st.write(f"Loaded {len(polygons)} valid geofences")
 
 # -----------------------------
-# CALCULATE MAP BOUNDS (KEY FIX)
+# ZONE CONTROLS (RESTORED)
 # -----------------------------
 
-if len(polygons) > 0:
-    all_bounds = [poly["polygon"].bounds for poly in polygons]
+results = pd.DataFrame(polygons)
+results["zone"] = results["zone"].astype(str)
 
-    min_lon = min(b[0] for b in all_bounds)
-    min_lat = min(b[1] for b in all_bounds)
-    max_lon = max(b[2] for b in all_bounds)
-    max_lat = max(b[3] for b in all_bounds)
+all_zones = list(results["zone"].unique())
+
+if "visible_zones" not in st.session_state:
+    st.session_state.visible_zones = all_zones
+
+col1, col2 = st.columns(2)
+
+if col1.button("Select All"):
+    st.session_state.visible_zones = all_zones
+
+if col2.button("Clear All"):
+    st.session_state.visible_zones = []
+
+visible_zones = st.multiselect(
+    "Select geofences to display",
+    options=all_zones,
+    key="visible_zones"
+)
+
+selected_zone = st.selectbox(
+    "Highlight a zone",
+    visible_zones if visible_zones else ["None"]
+)
+
+# -----------------------------
+# COMBINED MAP BOUNDS (KEY FIX)
+# -----------------------------
+
+bounds_list = []
+
+for poly in polygons:
+    b = poly["polygon"].bounds
+    bounds_list.append((b[1], b[0]))
+    bounds_list.append((b[3], b[2]))
+
+for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
+    try:
+        bounds_list.append((float(lat), float(lon)))
+    except:
+        pass
+
+if bounds_list:
+    min_lat = min(p[0] for p in bounds_list)
+    max_lat = max(p[0] for p in bounds_list)
+    min_lon = min(p[1] for p in bounds_list)
+    max_lon = max(p[1] for p in bounds_list)
 
     map_bounds = [[min_lat, min_lon], [max_lat, max_lon]]
 else:
     map_bounds = None
 
 # -----------------------------
-# MAP SETUP
+# MAP
 # -----------------------------
 
 center_lat = points_df[lat_col].mean()
 center_lon = points_df[lon_col].mean()
 
-m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=16
-)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
 
-# 🔥 FORCE MAP TO SHOW GEOFENCES
 if map_bounds:
     m.fit_bounds(map_bounds)
 
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri",
-    name="Satellite"
+    attr="Esri"
 ).add_to(m)
 
 # -----------------------------
-# HEATMAP (RESTORED STRONG VISUAL)
+# HEATMAP (RESTORED STRONG)
 # -----------------------------
 
 if show_heatmap:
@@ -148,30 +217,69 @@ if show_heatmap:
         ).add_to(m)
 
 # -----------------------------
-# DRAW GEOFENCES
+# DRAW GEOFENCES + BUFFER + COUNTS
 # -----------------------------
 
 if show_zones:
 
     for poly in polygons:
 
+        if poly["zone"] not in visible_zones:
+            continue
+
         coords = [(p[1], p[0]) for p in poly["polygon"].exterior.coords]
+
+        color = "yellow" if poly["zone"] == selected_zone else "lime"
 
         folium.Polygon(
             coords,
-            color="lime",
+            color=color,
             weight=4,
             fill=True,
-            fill_opacity=0.2
+            fill_opacity=0.15
+        ).add_to(m)
+
+        # buffer
+        buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
+
+        folium.PolyLine(
+            buffer_coords,
+            color="orange",
+            weight=2,
+            dash_array="6,6"
+        ).add_to(m)
+
+        c = poly["polygon"].centroid
+
+        folium.Marker(
+            [c.y, c.x],
+            icon=folium.DivIcon(
+                html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
+            )
+        ).add_to(m)
+
+        folium.Marker(
+            [c.y + 0.00006, c.x],
+            icon=folium.DivIcon(
+                html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
+            )
         ).add_to(m)
 
 # -----------------------------
-# RENDER MAP
+# RENDER
 # -----------------------------
 
 st.subheader("Map")
 
-components.html(
-    m._repr_html_(),
-    height=650
-)
+components.html(m._repr_html_(), height=650)
+
+# -----------------------------
+# TABLE (RESTORED)
+# -----------------------------
+
+results_table = results[
+    results["zone"].isin(visible_zones)
+][["zone", "count"]].sort_values("count", ascending=False)
+
+st.subheader("Zone Infringement Ranking")
+st.dataframe(results_table, use_container_width=True)
