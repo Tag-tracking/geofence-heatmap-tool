@@ -41,7 +41,7 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
         pass
 
 # -----------------------------
-# LOAD GEOFENCE CSV (CORRECT)
+# LOAD GEOFENCE CSV (lon, lat)
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
@@ -71,7 +71,6 @@ for _, row in geo_df.iterrows():
 
     try:
         poly = Polygon(coords)
-
         if poly.is_valid:
             polygons.append({
                 "zone": zone,
@@ -81,7 +80,7 @@ for _, row in geo_df.iterrows():
         continue
 
 # -----------------------------
-# PROXIMITY ANALYSIS (RESTORED)
+# PROXIMITY ANALYSIS
 # -----------------------------
 
 def compute_stats(_polygons, _points):
@@ -115,12 +114,13 @@ def compute_stats(_polygons, _points):
 
     return _polygons
 
+
 polygons = compute_stats(polygons, points)
 
 st.write(f"Loaded {len(polygons)} valid geofences")
 
 # -----------------------------
-# ZONE CONTROLS (RESTORED)
+# ZONE CONTROLS
 # -----------------------------
 
 results = pd.DataFrame(polygons)
@@ -151,7 +151,7 @@ selected_zone = st.selectbox(
 )
 
 # -----------------------------
-# COMBINED MAP BOUNDS (KEY FIX)
+# COMBINED MAP BOUNDS
 # -----------------------------
 
 bounds_list = []
@@ -195,7 +195,7 @@ folium.TileLayer(
 ).add_to(m)
 
 # -----------------------------
-# HEATMAP (RESTORED STRONG)
+# HEATMAP
 # -----------------------------
 
 if show_heatmap:
@@ -217,7 +217,7 @@ if show_heatmap:
         ).add_to(m)
 
 # -----------------------------
-# DRAW GEOFENCES + BUFFER + COUNTS
+# DRAW GEOFENCES
 # -----------------------------
 
 if show_zones:
@@ -249,24 +249,29 @@ if show_zones:
             dash_array="6,6"
         ).add_to(m)
 
+        # centroid
         c = poly["polygon"].centroid
 
-       popup_html = f"""
-<b>Zone:</b> {poly['zone']}<br>
-<b>Inside fixes:</b> {poly['count']}<br>
-<b>Within 5m:</b> {poly['near_count']}
-"""
+        popup_html = f"""
+        <b>Zone:</b> {poly['zone']}<br>
+        <b>Inside fixes:</b> {poly['count']}<br>
+        <b>Within 5m:</b> {poly['near_count']}
+        """
 
-folium.Marker(
-    [c.y, c.x],
-    popup=folium.Popup(popup_html, max_width=250),
-    icon=folium.DivIcon(
-        html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
-    )
-).add_to(m)
+        # main marker (click + hover)
+        folium.Marker(
+            [c.y, c.x],
+            popup=folium.Popup(popup_html, max_width=250),
+            tooltip=popup_html,
+            icon=folium.DivIcon(
+                html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
+            )
+        ).add_to(m)
 
+        # near count marker
         folium.Marker(
             [c.y + 0.00006, c.x],
+            tooltip=f"Within 5m: {poly['near_count']}",
             icon=folium.DivIcon(
                 html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
             )
@@ -277,11 +282,10 @@ folium.Marker(
 # -----------------------------
 
 st.subheader("Map")
-
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
-# TABLE (RESTORED)
+# TABLE
 # -----------------------------
 
 results_table = results[
