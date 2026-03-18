@@ -24,7 +24,7 @@ if not points_file or not geo_file:
     st.stop()
 
 # -----------------------------
-# LOAD HEATMAP DATA (TRUTH)
+# LOAD HEATMAP DATA
 # -----------------------------
 
 points_df = pd.read_csv(points_file)
@@ -66,19 +66,18 @@ for lat_raw, lon_raw in zip(points_df[lat_col], points_df[lon_col]):
 st.write(f"Total rows: {len(points_df)}")
 st.write(f"Valid GPS points used: {len(points)}")
 
-# Heatmap center (used as reference)
 heat_center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 heat_center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# LOAD GEOFENCE CSV (AUTO-DETECT)
+# GEOFENCE AUTO-DETECTION
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
 
 def build_polygons(coord_order):
 
-    test_polygons = []
+    polys = []
 
     for _, row in geo_df.iterrows():
 
@@ -110,14 +109,14 @@ def build_polygons(coord_order):
         try:
             poly = Polygon(coords)
             if poly.is_valid:
-                test_polygons.append({
+                polys.append({
                     "zone": zone,
                     "polygon": poly
                 })
         except:
             continue
 
-    return test_polygons
+    return polys
 
 def avg_distance(polys):
     if not polys:
@@ -131,14 +130,12 @@ def avg_distance(polys):
 
     return (total / len(polys)) ** 0.5
 
-# Try both formats
 polygons_lonlat = build_polygons("lonlat")
 polygons_latlon = build_polygons("latlon")
 
 dist_lonlat = avg_distance(polygons_lonlat)
 dist_latlon = avg_distance(polygons_latlon)
 
-# Choose best
 if dist_lonlat < dist_latlon:
     polygons = polygons_lonlat
     st.success("Geofence format detected: lon, lat")
@@ -146,45 +143,70 @@ else:
     polygons = polygons_latlon
     st.success("Geofence format detected: lat, lon")
 
-st.write(f"Loaded {len(polygons)} valid geofences")
-
 # -----------------------------
-# PROXIMITY ANALYSIS
+# PROXIMITY ANALYSIS (5m)
 # -----------------------------
 
-def compute_stats(_polygons, _points):
+def compute_stats(polygons, points):
 
     BUFFER_METERS = 5
     BUFFER_DEGREES = BUFFER_METERS / 111320
 
-    tree = STRtree(_points)
+    tree = STRtree(points)
 
-    for poly in _polygons:
+    for poly in polygons:
 
-        inside_count = 0
-        near_count = 0
+        inside = 0
+        near = 0
 
         buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
 
-        candidate_indexes = tree.query(buffer_poly)
-
-        for idx in candidate_indexes:
-
-            p = _points[idx]
-
+        for p in points:
             if poly["polygon"].contains(p):
-                inside_count += 1
+                inside += 1
             elif buffer_poly.contains(p):
-                near_count += 1
+                near += 1
 
-        poly["count"] = inside_count
-        poly["near_count"] = near_count
+        poly["count"] = inside
+        poly["near_count"] = near
         poly["buffer"] = buffer_poly
 
-    return _polygons
-
+    return polygons
 
 polygons = compute_stats(polygons, points)
+
+st.write(f"Loaded {len(polygons)} valid geofences")
+
+# -----------------------------
+# ZONE CONTROLS
+# -----------------------------
+
+results = pd.DataFrame(polygons)
+results["zone"] = results["zone"].astype(str)
+
+all_zones = list(results["zone"].unique())
+
+if "visible_zones" not in st.session_state:
+    st.session_state.visible_zones = all_zones
+
+col1, col2 = st.columns(2)
+
+if col1.button("Select All"):
+    st.session_state.visible_zones = all_zones
+
+if col2.button("Clear All"):
+    st.session_state.visible_zones = []
+
+visible_zones = st.multiselect(
+    "Select geofences to display",
+    options=all_zones,
+    key="visible_zones"
+)
+
+selected_zone = st.selectbox(
+    "Highlight a zone",
+    visible_zones if visible_zones else ["None"]
+)
 
 # -----------------------------
 # MAP
@@ -212,21 +234,36 @@ if show_zones:
 
     for poly in polygons:
 
+        if poly["zone"] not in visible_zones:
+            continue
+
         coords = [(p[1], p[0]) for p in poly["polygon"].exterior.coords]
+
+        color = "yellow" if poly["zone"] == selected_zone else "lime"
 
         folium.Polygon(
             coords,
-            color="lime",
-            weight=3,
+            color=color,
+            weight=4,
             fill=True,
             fill_opacity=0.15
+        ).add_to(m)
+
+        # buffer (5m)
+        buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
+
+        folium.PolyLine(
+            buffer_coords,
+            color="orange",
+            weight=2,
+            dash_array="6,6"
         ).add_to(m)
 
         c = poly["polygon"].centroid
 
         popup_html = f"""
         <b>Zone:</b> {poly['zone']}<br>
-        <b>Inside fixes:</b> {poly['count']}<br>
+        <b>Inside:</b> {poly['count']}<br>
         <b>Within 5m:</b> {poly['near_count']}
         """
 
@@ -245,3 +282,12 @@ if show_zones:
 
 st.subheader("Map")
 components.html(m._repr_html_(), height=650)
+
+# -----------------------------
+# TABLE
+# -----------------------------
+
+results_table = results[["zone", "count"]].sort_values("count", ascending=False)
+
+st.subheader("Zone Infringement Ranking")
+st.dataframe(results_table, use_container_width=True)
