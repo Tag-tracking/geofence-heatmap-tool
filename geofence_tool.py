@@ -41,7 +41,6 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
 
         points.append(Point(lon, lat))
         heat_data.append([lat, lon])
-
     except:
         continue
 
@@ -51,7 +50,7 @@ center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# LOAD GEOFENCES (FIXED LOGIC)
+# LOAD GEOFENCES (STABLE)
 # -----------------------------
 geo_df = pd.read_csv(geo_file)
 
@@ -71,7 +70,6 @@ def build_polygons(latlon_mode=False):
                 a = float(values[i])
                 b = float(values[i+1])
 
-                # default = lon, lat
                 if not latlon_mode:
                     lon, lat = a, b
                 else:
@@ -95,12 +93,10 @@ def build_polygons(latlon_mode=False):
 
     return polygons
 
-# try standard (correct for your data)
-polygons = build_polygons(latlon_mode=False)
+polygons = build_polygons(False)
 
-# fallback ONLY if clearly wrong
 if len(polygons) == 0:
-    polygons = build_polygons(latlon_mode=True)
+    polygons = build_polygons(True)
     st.warning("Fallback to lat/lon parsing")
 
 st.write(f"Loaded {len(polygons)} geofences")
@@ -153,11 +149,9 @@ folium.TileLayer(
     attr="Esri"
 ).add_to(m)
 
-# heatmap
 if show_heatmap:
     HeatMap(heat_data, radius=20, blur=15).add_to(m)
 
-# geofences
 if show_zones:
 
     for poly in polygons:
@@ -177,7 +171,6 @@ if show_zones:
             fill_opacity=0.15
         ).add_to(m)
 
-        # buffer
         buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -191,7 +184,6 @@ if show_zones:
 
         popup = f"{poly['zone']}<br>Inside: {poly['count']}<br>5m: {poly['near_count']}"
 
-        # inside marker
         folium.Marker(
             [c.y, c.x],
             popup=popup,
@@ -200,7 +192,6 @@ if show_zones:
             )
         ).add_to(m)
 
-        # 5m marker
         folium.Marker(
             [c.y + 0.00006, c.x],
             icon=folium.DivIcon(
@@ -209,6 +200,29 @@ if show_zones:
         ).add_to(m)
 
 # -----------------------------
-# RENDER
+# RENDER MAP
 # -----------------------------
 components.html(m._repr_html_(), height=650)
+
+# -----------------------------
+# RESULTS TABLE + EXPORT
+# -----------------------------
+results_df = pd.DataFrame([
+    {
+        "zone": p["zone"],
+        "inside_count": p["count"],
+        "within_5m": p["near_count"]
+    }
+    for p in polygons
+])
+
+results_df = results_df.sort_values("inside_count", ascending=False)
+
+st.subheader("Geofence Breakdown")
+st.dataframe(results_df, use_container_width=True)
+
+st.download_button(
+    "Download CSV",
+    results_df.to_csv(index=False),
+    "geofence_counts.csv"
+)
