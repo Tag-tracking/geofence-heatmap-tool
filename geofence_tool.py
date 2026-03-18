@@ -40,27 +40,25 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     except:
         pass
 
-
 # -----------------------------
-# LOAD GEOFENCE CSV
+# LOAD GEOFENCE CSV (ROBUST)
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
 
 polygons = []
 
-for _, row in geo_df.iterrows():
-
-    zone = str(row.iloc[0]).strip()
+def build_coords(values, mode):
     coords = []
-
-    values = row.iloc[1:].dropna().values
-
     for i in range(0, len(values) - 1, 2):
-
         try:
-            lon = float(values[i])
-            lat = float(values[i + 1])
+            v1 = float(values[i])
+            v2 = float(values[i + 1])
+
+            if mode == "latlon":
+                lat, lon = v1, v2
+            else:
+                lon, lat = v1, v2
 
             if abs(lat) > 90 or abs(lon) > 180:
                 continue
@@ -70,9 +68,27 @@ for _, row in geo_df.iterrows():
         except:
             continue
 
-    coords = list(dict.fromkeys(coords))
+    return coords
 
-    if len(coords) >= 3:
+# Reference center from heatmap
+center_lat = points_df[lat_col].mean()
+center_lon = points_df[lon_col].mean()
+
+for _, row in geo_df.iterrows():
+
+    zone = str(row.iloc[0]).strip()
+    values = row.iloc[1:].dropna().values
+
+    coords_latlon = build_coords(values, "latlon")
+    coords_lonlat = build_coords(values, "lonlat")
+
+    best_coords = None
+    best_distance = float("inf")
+
+    for coords in [coords_latlon, coords_lonlat]:
+
+        if len(coords) < 3:
+            continue
 
         if coords[0] != coords[-1]:
             coords.append(coords[0])
@@ -80,15 +96,31 @@ for _, row in geo_df.iterrows():
         try:
             poly = Polygon(coords)
 
-            if poly.is_valid:
-                polygons.append({
-                    "zone": zone,
-                    "polygon": poly
-                })
+            if not poly.is_valid:
+                continue
+
+            centroid = poly.centroid
+            dist = ((centroid.y - center_lat)**2 + (centroid.x - center_lon)**2)
+
+            if dist < best_distance:
+                best_distance = dist
+                best_coords = coords
 
         except:
-            pass
+            continue
 
+    # Only accept polygons near your course (~1km threshold)
+    if best_coords and best_distance < 0.01:
+
+        poly = Polygon(best_coords)
+
+        polygons.append({
+            "zone": zone,
+            "polygon": poly
+        })
+
+# Debug info
+st.write(f"Loaded {len(polygons)} valid geofences")
 
 # -----------------------------
 # FAST PROXIMITY ANALYSIS
@@ -177,9 +209,6 @@ selected_zone = st.selectbox(
 # MAP SETUP
 # -----------------------------
 
-center_lat = points_df[lat_col].mean()
-center_lon = points_df[lon_col].mean()
-
 m = folium.Map(
     location=[center_lat, center_lon],
     zoom_start=16
@@ -206,7 +235,6 @@ if show_heatmap:
             pass
 
     if heat_data:
-
         HeatMap(
             heat_data,
             radius=20,
@@ -234,7 +262,6 @@ if show_zones:
             color = "red"
             weight = 3
 
-        # draw geofence
         folium.Polygon(
             coords,
             color=color,
@@ -242,7 +269,6 @@ if show_zones:
             fill=False
         ).add_to(m)
 
-        # dashed proximity boundary
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -260,7 +286,6 @@ if show_zones:
         <b>Within 5m:</b> {poly['near_count']}
         """
 
-        # main count marker (clickable popup)
         folium.Marker(
             [c.y, c.x],
             popup=folium.Popup(popup_html, max_width=250),
@@ -269,7 +294,6 @@ if show_zones:
             )
         ).add_to(m)
 
-        # proximity marker
         folium.Marker(
             [c.y + 0.00006, c.x],
             icon=folium.DivIcon(
@@ -292,7 +316,9 @@ components.html(
 # RESULTS TABLE
 # -----------------------------
 
-results_table = results[results["zone"].isin(visible_zones)][["zone", "count"]].sort_values(
+results_table = results[
+    results["zone"].isin(visible_zones)
+][["zone", "count"]].sort_values(
     "count",
     ascending=False
 ).reset_index(drop=True)
@@ -310,4 +336,3 @@ st.download_button(
     results_table.to_csv(index=False),
     "zone_counts.csv"
 )
-
