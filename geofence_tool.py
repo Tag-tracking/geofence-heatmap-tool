@@ -41,168 +41,59 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
         pass
 
 # -----------------------------
-# LOAD GEOFENCE CSV (ROBUST)
+# LOAD GEOFENCE CSV (CORRECT FORMAT)
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
 
 polygons = []
 
-def build_coords(values, mode):
+for _, row in geo_df.iterrows():
+
+    zone = str(row.iloc[0]).strip()
+    values = row.iloc[1:].dropna().values
+
     coords = []
+
+    # ✅ YOUR FORMAT: lon, lat pairs
     for i in range(0, len(values) - 1, 2):
         try:
-            v1 = float(values[i])
-            v2 = float(values[i + 1])
-
-            if mode == "latlon":
-                lat, lon = v1, v2
-            else:
-                lon, lat = v1, v2
-
-            if abs(lat) > 90 or abs(lon) > 180:
-                continue
+            lon = float(values[i])
+            lat = float(values[i + 1])
 
             coords.append((lon, lat))
 
         except:
             continue
 
-    return coords
+    # need at least 3 points + closing
+    if len(coords) < 3:
+        continue
 
-# Reference center from heatmap
-center_lat = points_df[lat_col].mean()
-center_lon = points_df[lon_col].mean()
+    # close polygon
+    if coords[0] != coords[-1]:
+        coords.append(coords[0])
 
-for _, row in geo_df.iterrows():
+    try:
+        poly = Polygon(coords)
 
-    zone = str(row.iloc[0]).strip()
-    values = row.iloc[1:].dropna().values
+        if poly.is_valid:
+            polygons.append({
+                "zone": zone,
+                "polygon": poly
+            })
 
-    coords_latlon = build_coords(values, "latlon")
-    coords_lonlat = build_coords(values, "lonlat")
+    except:
+        continue
 
-    best_coords = None
-
-    for coords in [coords_latlon, coords_lonlat]:
-
-        # Require enough points
-        if len(coords) < 4:
-            continue
-
-        # Close polygon if needed
-        if coords[0] != coords[-1]:
-            coords.append(coords[0])
-
-        try:
-            poly = Polygon(coords)
-
-            if poly.is_valid:
-                best_coords = coords
-                break
-
-        except:
-            continue
-
-    # ✅ Accept ANY valid polygon (removed distance filter)
-    if best_coords:
-
-        poly = Polygon(best_coords)
-
-        polygons.append({
-            "zone": zone,
-            "polygon": poly
-        })
-
-# Debug info
 st.write(f"Loaded {len(polygons)} valid geofences")
-
-# -----------------------------
-# FAST PROXIMITY ANALYSIS
-# -----------------------------
-
-def compute_stats(_polygons, _points):
-
-    BUFFER_METERS = 5
-    BUFFER_DEGREES = BUFFER_METERS / 111320
-
-    tree = STRtree(_points)
-
-    for poly in _polygons:
-
-        inside_count = 0
-        near_count = 0
-
-        buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
-
-        candidate_indexes = tree.query(buffer_poly)
-
-        for idx in candidate_indexes:
-
-            p = _points[idx]
-
-            if poly["polygon"].contains(p):
-                inside_count += 1
-
-            elif buffer_poly.contains(p):
-                near_count += 1
-
-        poly["count"] = inside_count
-        poly["near_count"] = near_count
-        poly["buffer"] = buffer_poly
-
-    return _polygons
-
-
-polygons = compute_stats(polygons, points)
-
-# -----------------------------
-# RESULTS TABLE
-# -----------------------------
-
-results = pd.DataFrame(polygons)
-
-if len(results) == 0:
-    st.error("No geofences detected in file.")
-    st.stop()
-
-results["zone"] = results["zone"].astype(str)
-
-# -----------------------------
-# ZONE VISIBILITY CONTROLS
-# -----------------------------
-
-all_zones = list(results["zone"].unique())
-
-if "visible_zones" not in st.session_state:
-    st.session_state.visible_zones = all_zones
-
-col1, col2 = st.columns(2)
-
-if col1.button("Select All"):
-    st.session_state.visible_zones = all_zones
-
-if col2.button("Clear All"):
-    st.session_state.visible_zones = []
-
-visible_zones = st.multiselect(
-    "Select geofences to display",
-    options=all_zones,
-    key="visible_zones"
-)
-
-# -----------------------------
-# ZONE HIGHLIGHT
-# -----------------------------
-
-selected_zone = st.selectbox(
-    "Highlight a zone",
-    visible_zones if visible_zones else ["None"]
-)
 
 # -----------------------------
 # MAP SETUP
 # -----------------------------
+
+center_lat = points_df[lat_col].mean()
+center_lon = points_df[lon_col].mean()
 
 m = folium.Map(
     location=[center_lat, center_lon],
@@ -232,9 +123,9 @@ if show_heatmap:
     if heat_data:
         HeatMap(
             heat_data,
-            radius=20,
-            blur=15,
-            min_opacity=0.5
+            radius=15,
+            blur=10,
+            min_opacity=0.2
         ).add_to(m)
 
 # -----------------------------
@@ -245,55 +136,14 @@ if show_zones:
 
     for poly in polygons:
 
-        if poly["zone"] not in visible_zones:
-            continue
-
         coords = [(p[1], p[0]) for p in poly["polygon"].exterior.coords]
-
-        if poly["zone"] == selected_zone:
-            color = "yellow"
-            weight = 6
-        else:
-            color = "red"
-            weight = 3
 
         folium.Polygon(
             coords,
-            color=color,
-            weight=weight,
-            fill=False
-        ).add_to(m)
-
-        buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
-
-        folium.PolyLine(
-            buffer_coords,
-            color="orange",
-            weight=2,
-            dash_array="6,6"
-        ).add_to(m)
-
-        c = poly["polygon"].centroid
-
-        popup_html = f"""
-        <b>Zone:</b> {poly['zone']}<br>
-        <b>Inside fixes:</b> {poly['count']}<br>
-        <b>Within 5m:</b> {poly['near_count']}
-        """
-
-        folium.Marker(
-            [c.y, c.x],
-            popup=folium.Popup(popup_html, max_width=250),
-            icon=folium.DivIcon(
-                html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
-            )
-        ).add_to(m)
-
-        folium.Marker(
-            [c.y + 0.00006, c.x],
-            icon=folium.DivIcon(
-                html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
-            )
+            color="lime",
+            weight=4,
+            fill=True,
+            fill_opacity=0.15
         ).add_to(m)
 
 # -----------------------------
@@ -305,29 +155,4 @@ st.subheader("Map")
 components.html(
     m._repr_html_(),
     height=650
-)
-
-# -----------------------------
-# RESULTS TABLE
-# -----------------------------
-
-results_table = results[
-    results["zone"].isin(visible_zones)
-][["zone", "count"]].sort_values(
-    "count",
-    ascending=False
-).reset_index(drop=True)
-
-st.subheader("Zone Infringement Ranking")
-
-st.dataframe(results_table, use_container_width=True)
-
-# -----------------------------
-# DOWNLOAD RESULTS
-# -----------------------------
-
-st.download_button(
-    "Download Zone Counts CSV",
-    results_table.to_csv(index=False),
-    "zone_counts.csv"
 )
