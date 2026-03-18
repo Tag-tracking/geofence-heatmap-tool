@@ -275,6 +275,15 @@ if show_zones:
                 html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
             )
         ).add_to(m)
+        
+# 5m proximity marker (slightly offset so it doesn't overlap)
+folium.Marker(
+    [c.y + 0.00006, c.x],
+    tooltip=f"Within 5m: {poly['near_count']}",
+    icon=folium.DivIcon(
+        html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
+    )
+).add_to(m)
 
 # -----------------------------
 # RENDER
