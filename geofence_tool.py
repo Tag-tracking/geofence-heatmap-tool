@@ -133,10 +133,7 @@ def avg_distance(polys):
 polygons_lonlat = build_polygons("lonlat")
 polygons_latlon = build_polygons("latlon")
 
-dist_lonlat = avg_distance(polygons_lonlat)
-dist_latlon = avg_distance(polygons_latlon)
-
-if dist_lonlat < dist_latlon:
+if avg_distance(polygons_lonlat) < avg_distance(polygons_latlon):
     polygons = polygons_lonlat
     st.success("Geofence format detected: lon, lat")
 else:
@@ -144,7 +141,7 @@ else:
     st.success("Geofence format detected: lat, lon")
 
 # -----------------------------
-# PROXIMITY ANALYSIS (5m)
+# PROXIMITY ANALYSIS
 # -----------------------------
 
 def compute_stats(polygons, points):
@@ -249,7 +246,7 @@ if show_zones:
             fill_opacity=0.15
         ).add_to(m)
 
-        # buffer (5m)
+        # 5m buffer
         buffer_coords = [(p[1], p[0]) for p in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -267,6 +264,7 @@ if show_zones:
         <b>Within 5m:</b> {poly['near_count']}
         """
 
+        # Inside marker (white)
         folium.Marker(
             [c.y, c.x],
             popup=popup_html,
@@ -275,15 +273,15 @@ if show_zones:
                 html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
             )
         ).add_to(m)
-        
-# 5m proximity marker (slightly offset so it doesn't overlap)
-folium.Marker(
-    [c.y + 0.00006, c.x],
-    tooltip=f"Within 5m: {poly['near_count']}",
-    icon=folium.DivIcon(
-        html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
-    )
-).add_to(m)
+
+        # 🔥 5m marker (orange)
+        folium.Marker(
+            [c.y + 0.00006, c.x],
+            tooltip=f"Within 5m: {poly['near_count']}",
+            icon=folium.DivIcon(
+                html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange;font-size:12px;line-height:22px'>{poly['near_count']}</div>"
+            )
+        ).add_to(m)
 
 # -----------------------------
 # RENDER
@@ -296,7 +294,9 @@ components.html(m._repr_html_(), height=650)
 # TABLE
 # -----------------------------
 
-results_table = results[["zone", "count"]].sort_values("count", ascending=False)
+results_table = results[
+    results["zone"].isin(visible_zones)
+][["zone", "count"]].sort_values("count", ascending=False)
 
 st.subheader("Zone Infringement Ranking")
 st.dataframe(results_table, use_container_width=True)
