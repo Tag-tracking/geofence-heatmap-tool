@@ -41,7 +41,7 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
         pass
 
 # -----------------------------
-# LOAD GEOFENCE CSV (CORRECT FORMAT)
+# LOAD GEOFENCE CSV (YOUR FORMAT: lon, lat)
 # -----------------------------
 
 geo_df = pd.read_csv(geo_file)
@@ -55,7 +55,7 @@ for _, row in geo_df.iterrows():
 
     coords = []
 
-    # ✅ YOUR FORMAT: lon, lat pairs
+    # ✅ Your format: lon, lat pairs
     for i in range(0, len(values) - 1, 2):
         try:
             lon = float(values[i])
@@ -66,7 +66,6 @@ for _, row in geo_df.iterrows():
         except:
             continue
 
-    # need at least 3 points + closing
     if len(coords) < 3:
         continue
 
@@ -89,6 +88,22 @@ for _, row in geo_df.iterrows():
 st.write(f"Loaded {len(polygons)} valid geofences")
 
 # -----------------------------
+# CALCULATE MAP BOUNDS (KEY FIX)
+# -----------------------------
+
+if len(polygons) > 0:
+    all_bounds = [poly["polygon"].bounds for poly in polygons]
+
+    min_lon = min(b[0] for b in all_bounds)
+    min_lat = min(b[1] for b in all_bounds)
+    max_lon = max(b[2] for b in all_bounds)
+    max_lat = max(b[3] for b in all_bounds)
+
+    map_bounds = [[min_lat, min_lon], [max_lat, max_lon]]
+else:
+    map_bounds = None
+
+# -----------------------------
 # MAP SETUP
 # -----------------------------
 
@@ -100,6 +115,10 @@ m = folium.Map(
     zoom_start=16
 )
 
+# 🔥 FORCE MAP TO SHOW GEOFENCES
+if map_bounds:
+    m.fit_bounds(map_bounds)
+
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attr="Esri",
@@ -107,7 +126,7 @@ folium.TileLayer(
 ).add_to(m)
 
 # -----------------------------
-# HEATMAP
+# HEATMAP (RESTORED STRONG VISUAL)
 # -----------------------------
 
 if show_heatmap:
@@ -123,9 +142,9 @@ if show_heatmap:
     if heat_data:
         HeatMap(
             heat_data,
-            radius=15,
-            blur=10,
-            min_opacity=0.2
+            radius=20,
+            blur=15,
+            min_opacity=0.5
         ).add_to(m)
 
 # -----------------------------
@@ -143,7 +162,7 @@ if show_zones:
             color="lime",
             weight=4,
             fill=True,
-            fill_opacity=0.15
+            fill_opacity=0.2
         ).add_to(m)
 
 # -----------------------------
