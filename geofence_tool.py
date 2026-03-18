@@ -251,12 +251,19 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        folium.Marker(
-            [c.y, c.x],
-            icon=folium.DivIcon(
-                html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
-            )
-        ).add_to(m)
+       popup_html = f"""
+<b>Zone:</b> {poly['zone']}<br>
+<b>Inside fixes:</b> {poly['count']}<br>
+<b>Within 5m:</b> {poly['near_count']}
+"""
+
+folium.Marker(
+    [c.y, c.x],
+    popup=folium.Popup(popup_html, max_width=250),
+    icon=folium.DivIcon(
+        html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid grey;font-size:12px;line-height:22px'>{poly['count']}</div>"
+    )
+).add_to(m)
 
         folium.Marker(
             [c.y + 0.00006, c.x],
