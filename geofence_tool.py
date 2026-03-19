@@ -48,7 +48,7 @@ center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# BUILD GEOFENCES (auto handles both formats)
+# BUILD GEOFENCES (handles both formats)
 # -----------------------------
 def build_polygons(latlon_mode=False):
 
@@ -135,12 +135,22 @@ highlight_zone = st.selectbox(
 # -----------------------------
 # MAP
 # -----------------------------
-m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=16, tiles=None)
+
+# Stable tile layers (fix 403 issue)
+folium.TileLayer(
+    tiles="https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+    attr="OSM HOT",
+    name="Street Map"
+).add_to(m)
 
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri"
+    attr="Esri",
+    name="Satellite"
 ).add_to(m)
+
+folium.LayerControl().add_to(m)
 
 if show_heatmap:
     HeatMap(heat_data, radius=20, blur=15).add_to(m)
@@ -203,11 +213,15 @@ if show_zones:
 # -----------------------------
 # RENDER MAP
 # -----------------------------
+st.caption("Tip: Use the layer control (top right of map) to switch map styles")
+
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
-# CSV EXPORT
+# RESULTS TABLE
 # -----------------------------
+st.subheader("Geofence Breakdown")
+
 results_df = pd.DataFrame([
     {
         "zone": p["zone"],
@@ -216,6 +230,8 @@ results_df = pd.DataFrame([
     }
     for p in polygons
 ]).sort_values("inside", ascending=False)
+
+st.dataframe(results_df, use_container_width=True)
 
 st.download_button(
     "Download CSV",
