@@ -51,7 +51,7 @@ center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# LOAD GEOFENCES (FIXED LOGIC)
+# LOAD GEOFENCES
 # -----------------------------
 geo_df = pd.read_csv(geo_file)
 
@@ -71,7 +71,6 @@ def build_polygons(latlon_mode=False):
                 a = float(values[i])
                 b = float(values[i+1])
 
-                # default = lon, lat
                 if not latlon_mode:
                     lon, lat = a, b
                 else:
@@ -95,10 +94,8 @@ def build_polygons(latlon_mode=False):
 
     return polygons
 
-# try standard (correct for your data)
 polygons = build_polygons(latlon_mode=False)
 
-# fallback ONLY if clearly wrong
 if len(polygons) == 0:
     polygons = build_polygons(latlon_mode=True)
     st.warning("Fallback to lat/lon parsing")
@@ -106,7 +103,7 @@ if len(polygons) == 0:
 st.write(f"Loaded {len(polygons)} geofences")
 
 # -----------------------------
-# 5M PROXIMITY
+# PROXIMITY
 # -----------------------------
 BUFFER_DEGREES = 5 / 111320
 
@@ -150,12 +147,18 @@ m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
 
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri"
+    attr="Esri Satellite",
+    max_zoom=21
 ).add_to(m)
 
 # heatmap
 if show_heatmap:
-    HeatMap(heat_data, radius=20, blur=15).add_to(m)
+    HeatMap(
+        heat_data,
+        radius=25,
+        blur=12,
+        min_opacity=0.4
+    ).add_to(m)
 
 # geofences
 if show_zones:
@@ -189,14 +192,37 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        popup = f"{poly['zone']}<br>Inside: {poly['count']}<br>5m: {poly['near_count']}"
+        # hover popup (tooltip)
+        popup = f"""
+        <div style="font-size:14px;padding:8px;min-width:140px;">
+            <b>{poly['zone']}</b><br>
+            <hr style="margin:4px 0;">
+            Inside: <b>{poly['count']}</b><br>
+            Within 5m: <b>{poly['near_count']}</b>
+        </div>
+        """
 
         # inside marker
         folium.Marker(
             [c.y, c.x],
-            popup=popup,
+            tooltip=popup,
             icon=folium.DivIcon(
-                html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid black'>{poly['count']}</div>"
+                html=f"""
+                <div style="
+                    background:white;
+                    border-radius:50%;
+                    width:26px;
+                    height:26px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    border:2px solid black;
+                    font-size:12px;
+                    font-weight:bold;
+                ">
+                    {poly['count']}
+                </div>
+                """
             )
         ).add_to(m)
 
@@ -204,7 +230,21 @@ if show_zones:
         folium.Marker(
             [c.y + 0.00006, c.x],
             icon=folium.DivIcon(
-                html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange'>{poly['near_count']}</div>"
+                html=f"""
+                <div style="
+                    background:#ffe5b4;
+                    border-radius:50%;
+                    width:24px;
+                    height:24px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    border:2px solid orange;
+                    font-size:11px;
+                ">
+                    {poly['near_count']}
+                </div>
+                """
             )
         ).add_to(m)
 
@@ -212,3 +252,25 @@ if show_zones:
 # RENDER
 # -----------------------------
 components.html(m._repr_html_(), height=650)
+
+# -----------------------------
+# BREAKDOWN TABLE (ADDED BACK)
+# -----------------------------
+st.subheader("Geofence Breakdown")
+
+results_df = pd.DataFrame([
+    {
+        "zone": p["zone"],
+        "inside": p["count"],
+        "within_5m": p["near_count"]
+    }
+    for p in polygons
+]).sort_values("inside", ascending=False)
+
+st.dataframe(results_df, use_container_width=True)
+
+st.download_button(
+    "Download CSV",
+    results_df.to_csv(index=False),
+    "geofence_counts.csv"
+)
