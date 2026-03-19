@@ -274,3 +274,17 @@ st.download_button(
     results_df.to_csv(index=False),
     "geofence_counts.csv"
 )
+
+import tempfile
+
+st.subheader("Export")
+
+tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+m.save(tmp.name)
+
+with open(tmp.name, "rb") as f:
+    st.download_button(
+        "Download Interactive Map (Client)",
+        f,
+        file_name="geofence_map.html"
+    )
