@@ -19,34 +19,19 @@ show_heatmap = st.checkbox("Show Heatmap", True)
 show_zones = st.checkbox("Show Geofences", True)
 
 if not points_file or not geo_file:
-    st.warning("Please upload both files")
     st.stop()
 
 points_df = pd.read_csv(points_file)
 geo_df = pd.read_csv(geo_file)
 
 # -----------------------------
-# DETECT LAT/LON COLUMNS
+# HEATMAP PARSING (STRICT)
 # -----------------------------
-lat_col = None
-lon_col = None
+lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
+lon_col = [c for c in points_df.columns if "lon" in c.lower() or "lng" in c.lower()][0]
 
-for c in points_df.columns:
-    cl = c.lower()
-    if "lat" in cl:
-        lat_col = c
-    if "lon" in cl or "lng" in cl:
-        lon_col = c
-
-if lat_col is None or lon_col is None:
-    st.error("Could not detect latitude/longitude columns")
-    st.stop()
-
-# -----------------------------
-# PARSE POINTS
-# -----------------------------
-points = []
 heat_data = []
+points = []
 
 for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     try:
@@ -54,70 +39,53 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
         lon = float(lon)
 
         if -90 <= lat <= 90 and -180 <= lon <= 180:
-            pt = Point(lon, lat)
-            points.append(pt)
             heat_data.append([lat, lon])
+            points.append(Point(lon, lat))
     except:
         continue
 
 if len(heat_data) == 0:
-    st.error("No valid GPS points found")
+    st.error("No valid heatmap points")
     st.stop()
-
-st.success(f"Valid GPS points used: {len(heat_data)}")
 
 center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
+st.success(f"Valid GPS points used: {len(heat_data)}")
+
 # -----------------------------
-# BUILD GEOFENCES (ROBUST)
+# GEOFENCE PARSING (FIXED)
 # -----------------------------
-def build_polygons():
+polygons = []
 
-    polys = []
+for _, row in geo_df.iterrows():
 
-    for _, row in geo_df.iterrows():
+    zone = str(row.iloc[0]).strip()
+    values = row.iloc[1:].dropna().values
 
-        zone = str(row.iloc[0]).strip()
-        values = row.iloc[1:].dropna().values
+    coords = []
 
-        coords_lonlat = []
-        coords_latlon = []
+    for i in range(0, len(values)-1, 2):
+        try:
+            lon = float(values[i])
+            lat = float(values[i+1])
 
-        for i in range(0, len(values)-1, 2):
-            try:
-                a = float(values[i])
-                b = float(values[i+1])
+            coords.append((lon, lat))
+        except:
+            continue
 
-                coords_lonlat.append((a, b))  # lon, lat
-                coords_latlon.append((b, a))  # lon, lat flipped
-            except:
-                continue
+    if len(coords) >= 3:
 
-        # Try BOTH interpretations
-        for coords in [coords_lonlat, coords_latlon]:
+        if coords[0] != coords[-1]:
+            coords.append(coords[0])
 
-            if len(coords) < 3:
-                continue
+        poly = Polygon(coords)
 
-            if coords[0] != coords[-1]:
-                coords.append(coords[0])
-
-            try:
-                poly = Polygon(coords)
-
-                if poly.is_valid:
-                    polys.append({
-                        "zone": zone,
-                        "polygon": poly
-                    })
-                    break
-            except:
-                continue
-
-    return polys
-
-polygons = build_polygons()
+        if poly.is_valid:
+            polygons.append({
+                "zone": zone,
+                "polygon": poly
+            })
 
 if len(polygons) == 0:
     st.error("No valid geofences detected")
@@ -126,16 +94,16 @@ if len(polygons) == 0:
 st.success(f"Loaded {len(polygons)} geofences")
 
 # -----------------------------
-# PROXIMITY
+# PROXIMITY (5m)
 # -----------------------------
-BUFFER_DEGREES = 5 / 111320
+BUFFER = 5 / 111320
 
 for poly in polygons:
 
     inside = 0
     near = 0
 
-    buffer_poly = poly["polygon"].buffer(BUFFER_DEGREES)
+    buffer_poly = poly["polygon"].buffer(BUFFER)
 
     for p in points:
         if poly["polygon"].contains(p):
@@ -148,17 +116,17 @@ for poly in polygons:
     poly["buffer"] = buffer_poly
 
 # -----------------------------
-# UI CONTROLS
+# UI
 # -----------------------------
 zones = [p["zone"] for p in polygons]
 
-selected_zones = st.multiselect(
+selected = st.multiselect(
     "Select geofences to display",
     zones,
     default=zones
 )
 
-highlight_zone = st.selectbox(
+highlight = st.selectbox(
     "Highlight a zone",
     ["None"] + zones
 )
@@ -166,40 +134,31 @@ highlight_zone = st.selectbox(
 # -----------------------------
 # MAP
 # -----------------------------
-m = folium.Map(location=[center_lat, center_lon], zoom_start=15, tiles=None)
-
-# FIXED TILE PROVIDERS
-folium.TileLayer(
-    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri Satellite",
-    name="Satellite",
-    control=True
-).add_to(m)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=15)
 
 folium.TileLayer(
-    tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    attr="OpenStreetMap",
-    name="Street",
-    control=True
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri",
+    name="Satellite"
 ).add_to(m)
 
 folium.LayerControl().add_to(m)
 
-# HEATMAP
+# Heatmap
 if show_heatmap:
     HeatMap(heat_data, radius=18, blur=12).add_to(m)
 
-# GEOFENCES
+# Geofences
 if show_zones:
 
     for poly in polygons:
 
-        if poly["zone"] not in selected_zones:
+        if poly["zone"] not in selected:
             continue
 
         coords = [(y, x) for x, y in poly["polygon"].exterior.coords]
 
-        color = "yellow" if poly["zone"] == highlight_zone else "lime"
+        color = "yellow" if poly["zone"] == highlight else "lime"
 
         folium.Polygon(
             coords,
@@ -209,7 +168,6 @@ if show_zones:
             fill_opacity=0.2
         ).add_to(m)
 
-        # 5m buffer
         buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -221,28 +179,17 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        popup_html = f"""
-        <div style="font-size:13px;padding:6px;min-width:140px;">
-            <b>{poly['zone']}</b><br>
-            Inside: {poly['count']}<br>
-            Within 5m: {poly['near_count']}
-        </div>
+        popup = f"""
+        <b>{poly['zone']}</b><br>
+        Inside: {poly['count']}<br>
+        5m: {poly['near_count']}
         """
 
         folium.Marker(
             [c.y, c.x],
-            popup=folium.Popup(popup_html),
-            tooltip=popup_html,
+            popup=popup,
             icon=folium.DivIcon(
                 html=f"<div style='background:white;border-radius:50%;width:24px;height:24px;text-align:center;border:1px solid black'>{poly['count']}</div>"
-            )
-        ).add_to(m)
-
-        folium.Marker(
-            [c.y + 0.00005, c.x],
-            tooltip=f"5m: {poly['near_count']}",
-            icon=folium.DivIcon(
-                html=f"<div style='background:#ffe5b4;border-radius:50%;width:24px;height:24px;text-align:center;border:1px solid orange'>{poly['near_count']}</div>"
             )
         ).add_to(m)
 
@@ -263,7 +210,7 @@ df = pd.DataFrame([
         "within_5m": p["near_count"]
     }
     for p in polygons
-]).sort_values("inside", ascending=False)
+])
 
 st.dataframe(df, use_container_width=True)
 
@@ -272,18 +219,3 @@ st.download_button(
     df.to_csv(index=False),
     "geofence_counts.csv"
 )
-
-# -----------------------------
-# DOWNLOAD MAP
-# -----------------------------
-if st.button("Download Interactive Map"):
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
-    m.save(tmp.name)
-
-    with open(tmp.name, "rb") as f:
-        st.download_button(
-            "Download Map",
-            f,
-            "map.html"
-        )
