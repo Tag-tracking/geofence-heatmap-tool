@@ -2,271 +2,231 @@ import streamlit as st
 import pandas as pd
 import folium
 from shapely.geometry import Point, Polygon
+from shapely.ops import unary_union
 from folium.plugins import HeatMap
-import streamlit.components.v1 as components
+from streamlit_folium import st_folium
 import tempfile
 
 st.set_page_config(layout="wide")
-st.title("Geofence Heatmap Analyzer")
 
-# -----------------------------
-# FILE UPLOAD
-# -----------------------------
-points_file = st.file_uploader("Upload Heatmap CSV")
-geo_file = st.file_uploader("Upload Geofence CSV")
+st.title("Geofence Heatmap Tool")
 
-if not points_file or not geo_file:
-    st.stop()
+# =========================
+# FILE UPLOADS
+# =========================
+fixes_file = st.file_uploader("Upload Fixes CSV", type=["csv"])
+geo_file = st.file_uploader("Upload Geofences CSV", type=["csv"])
 
-points_df = pd.read_csv(points_file)
-geo_df = pd.read_csv(geo_file)
+if fixes_file and geo_file:
 
-# -----------------------------
-# HEATMAP
-# -----------------------------
-lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
-lon_col = [c for c in points_df.columns if "lon" in c.lower() or "lng" in c.lower()][0]
+    df = pd.read_csv(fixes_file)
+    geo_df = pd.read_csv(geo_file)
 
-heat_data = []
-points = []
+    st.success(f"Valid GPS points used: {len(df)}")
 
-for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
-    try:
-        lat = float(lat)
-        lon = float(lon)
-        heat_data.append([lat, lon])
-        points.append(Point(lon, lat))
-    except:
-        continue
+    # =========================
+    # DETECT LAT/LON FORMAT
+    # =========================
+    def detect_lat_lon(df):
+        cols = df.columns.tolist()
+        for lat in ["lat", "latitude", "Latitude"]:
+            for lon in ["lon", "lng", "longitude", "Longitude"]:
+                if lat in cols and lon in cols:
+                    return lat, lon
+        return cols[0], cols[1]
 
-center_lat = sum(p[0] for p in heat_data) / len(heat_data)
-center_lon = sum(p[1] for p in heat_data) / len(heat_data)
+    lat_col, lon_col = detect_lat_lon(df)
 
-st.success(f"Valid GPS points: {len(heat_data)}")
+    df = df[[lat_col, lon_col]].dropna()
+    df.columns = ["lat", "lon"]
 
-# -----------------------------
-# GEOFENCES
-# -----------------------------
-polygons = []
+    points = [Point(xy) for xy in zip(df["lon"], df["lat"])]
 
-for _, row in geo_df.iterrows():
+    center_lat = df["lat"].mean()
+    center_lon = df["lon"].mean()
 
-    zone = str(row.iloc[0]).strip()
-    values = row.iloc[1:].dropna().values
+    # =========================
+    # MAP
+    # =========================
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=16,
+        control_scale=True,
+        tiles=None
+    )
 
-    coords = []
+    # Satellite (deep zoom, no grey tiles)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Satellite",
+        max_zoom=21
+    ).add_to(m)
 
-    for i in range(0, len(values)-1, 2):
-        try:
-            lon = float(values[i])
-            lat = float(values[i+1])
-            coords.append((lon, lat))
-        except:
-            continue
+    folium.LayerControl().add_to(m)
 
-    if len(coords) >= 3:
-        if coords[0] != coords[-1]:
-            coords.append(coords[0])
+    # =========================
+    # HEATMAP
+    # =========================
+    heat_data = df[["lat", "lon"]].values.tolist()
+    HeatMap(heat_data, radius=8).add_to(m)
 
+    # =========================
+    # LOAD GEOFENCES
+    # =========================
+    polygons = []
+
+    for name, group in geo_df.groupby("zone"):
+        coords = list(zip(group["lon"], group["lat"]))
         poly = Polygon(coords)
 
-        if poly.is_valid:
-            polygons.append({"zone": zone, "polygon": poly})
+        polygons.append({
+            "zone": name,
+            "polygon": poly,
+            "count": 0,
+            "near_count": 0
+        })
 
-st.success(f"Loaded {len(polygons)} geofences")
+    st.success(f"Loaded {len(polygons)} geofences")
 
-# -----------------------------
-# PROXIMITY (5m)
-# -----------------------------
-BUFFER = 5 / 111320
+    # =========================
+    # COUNT POINTS
+    # =========================
+    for pt in points:
+        for poly in polygons:
+            if poly["polygon"].contains(pt):
+                poly["count"] += 1
+            elif poly["polygon"].buffer(0.00005).contains(pt):  # ~5m
+                poly["near_count"] += 1
 
-for poly in polygons:
+    # =========================
+    # UI SELECT
+    # =========================
+    zones = [p["zone"] for p in polygons]
 
-    inside = 0
-    near = 0
+    selected = st.multiselect(
+        "Select geofences to display",
+        zones,
+        default=zones
+    )
 
-    buffer_poly = poly["polygon"].buffer(BUFFER)
+    # =========================
+    # DRAW GEOFENCES
+    # =========================
+    for poly in polygons:
+        if poly["zone"] not in selected:
+            continue
 
-    for p in points:
-        if poly["polygon"].contains(p):
-            inside += 1
-        elif buffer_poly.contains(p):
-            near += 1
+        coords = [(y, x) for x, y in poly["polygon"].exterior.coords]
 
-    poly["count"] = inside
-    poly["near_count"] = near
-    poly["buffer"] = buffer_poly
+        # Main geofence
+        folium.Polygon(
+            locations=coords,
+            color="green",
+            weight=3,
+            fill=True,
+            fill_opacity=0.2
+        ).add_to(m)
 
-# -----------------------------
-# UI CONTROLS
-# -----------------------------
-zones = [p["zone"] for p in polygons]
+        # 5m buffer
+        buffer_coords = [(y, x) for x, y in poly["polygon"].buffer(0.00005).exterior.coords]
 
-selected_zones = st.multiselect(
-    "Select geofences to display",
-    zones,
-    default=zones
-)
+        folium.Polygon(
+            locations=buffer_coords,
+            color="orange",
+            weight=2,
+            dash_array="5,5",
+            fill=False
+        ).add_to(m)
 
-highlight_zone = st.selectbox(
-    "Highlight a zone",
-    ["None"] + zones
-)
+        # Center point
+        c = poly["polygon"].centroid
 
-# -----------------------------
-# MAP
-# -----------------------------
-m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=15,
-    tiles=None
-)
+        # Popup
+        popup_html = f"""
+        <div style="font-size:14px; padding:10px; min-width:160px;">
+            <b>{poly['zone']}</b><br>
+            <hr>
+            Inside: {poly['count']}<br>
+            Within 5m: {poly['near_count']}
+        </div>
+        """
 
-folium.TileLayer(
-    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri Satellite",
-    max_zoom=21
-).add_to(m)
+        folium.Marker(
+            [c.y, c.x],
+            popup=folium.Popup(popup_html, max_width=250),
+            icon=folium.DivIcon(
+                html=f"""
+                <div style="
+                    background:white;
+                    border-radius:50%;
+                    width:28px;
+                    height:28px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    border:2px solid black;
+                    font-size:13px;
+                    font-weight:bold;
+                ">
+                    {poly['count']}
+                </div>
+                """
+            )
+        ).add_to(m)
 
-# -----------------------------
-# HEATMAP
-# -----------------------------
-HeatMap(
-    heat_data,
-    radius=25,
-    blur=10,
-    min_opacity=0.4
-).add_to(m)
+        # 5m label (orange)
+        folium.Marker(
+            [c.y + 0.00003, c.x],
+            icon=folium.DivIcon(
+                html=f"""
+                <div style="
+                    background:orange;
+                    border-radius:50%;
+                    width:22px;
+                    height:22px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:11px;
+                    font-weight:bold;
+                ">
+                    {poly['near_count']}
+                </div>
+                """
+            )
+        ).add_to(m)
 
-# -----------------------------
-# GEOFENCES
-# -----------------------------
-for poly in polygons:
+    # =========================
+    # DISPLAY MAP
+    # =========================
+    st_folium(m, width=1400, height=700)
 
-    if poly["zone"] not in selected_zones:
-        continue
+    # =========================
+    # BREAKDOWN TABLE
+    # =========================
+    st.subheader("Geofence Breakdown")
 
-    coords = [(y, x) for x, y in poly["polygon"].exterior.coords]
+    breakdown = pd.DataFrame([
+        {
+            "zone": p["zone"],
+            "inside": p["count"],
+            "within_5m": p["near_count"]
+        }
+        for p in polygons if p["zone"] in selected
+    ])
 
-    color = "yellow" if poly["zone"] == highlight_zone else "lime"
+    st.dataframe(breakdown)
 
-    folium.Polygon(
-        coords,
-        color=color,
-        weight=4,
-        fill=True,
-        fill_opacity=0.2
-    ).add_to(m)
-
-    # 5m buffer
-    buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
-
-    folium.PolyLine(
-        buffer_coords,
-        color="orange",
-        weight=2,
-        dash_array="5,5"
-    ).add_to(m)
-
-    # Popup
-    popup_html = f"""
-    <div style="font-size:14px;padding:10px;min-width:160px;">
-        <b>{poly['zone']}</b><br>
-        <hr style="margin:4px 0;">
-        Inside: <b>{poly['count']}</b><br>
-        Within 5m: <b>{poly['near_count']}</b>
-    </div>
-    """
-
-    c = poly["polygon"].centroid
-
-    # Main count marker (centered)
-    folium.Marker(
-        [c.y, c.x],
-        popup=folium.Popup(popup_html, max_width=250),
-        tooltip=poly["zone"],
-        icon=folium.DivIcon(
-            html=f"""
-            <div style="
-                background:white;
-                border-radius:50%;
-                width:28px;
-                height:28px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                border:2px solid black;
-                font-size:13px;
-                font-weight:bold;
-            ">
-                {poly['count']}
-            </div>
-            """
-        )
-    ).add_to(m)
-
-    # 5m marker (orange)
-    folium.Marker(
-        [c.y + 0.00006, c.x],
-        tooltip=f"5m: {poly['near_count']}",
-        icon=folium.DivIcon(
-            html=f"""
-            <div style="
-                background:#ffe5b4;
-                border-radius:50%;
-                width:26px;
-                height:26px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                border:2px solid orange;
-                font-size:12px;
-            ">
-                {poly['near_count']}
-            </div>
-            """
-        )
-    ).add_to(m)
-
-# -----------------------------
-# RENDER
-# -----------------------------
-components.html(m._repr_html_(), height=700)
-
-# -----------------------------
-# TABLE
-# -----------------------------
-st.subheader("Geofence Breakdown")
-
-df = pd.DataFrame([
-    {
-        "zone": p["zone"],
-        "inside": p["count"],
-        "within_5m": p["near_count"]
-    }
-    for p in polygons
-]).sort_values("inside", ascending=False)
-
-st.dataframe(df, use_container_width=True)
-
-st.download_button(
-    "Download CSV",
-    df.to_csv(index=False),
-    "geofence_counts.csv"
-)
-
-# -----------------------------
-# HTML DOWNLOAD
-# -----------------------------
-if st.button("Download Interactive Map (Send to Client)"):
-
+    # =========================
+    # HTML EXPORT
+    # =========================
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
     m.save(tmp.name)
 
     with open(tmp.name, "rb") as f:
         st.download_button(
-            label="Download Map File",
-            data=f,
-            file_name="geofence_map.html",
-            mime="text/html"
+            "Download Map (Client View)",
+            f,
+            file_name="map.html"
         )
