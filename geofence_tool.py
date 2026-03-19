@@ -19,17 +19,32 @@ show_heatmap = st.checkbox("Show Heatmap", True)
 show_zones = st.checkbox("Show Geofences", True)
 
 if not points_file or not geo_file:
+    st.warning("Please upload both files")
     st.stop()
 
 points_df = pd.read_csv(points_file)
 geo_df = pd.read_csv(geo_file)
 
 # -----------------------------
-# LOAD HEATMAP
+# DETECT LAT/LON COLUMNS
 # -----------------------------
-lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
-lon_col = [c for c in points_df.columns if "lon" in c.lower()][0]
+lat_col = None
+lon_col = None
 
+for c in points_df.columns:
+    cl = c.lower()
+    if "lat" in cl:
+        lat_col = c
+    if "lon" in cl or "lng" in cl:
+        lon_col = c
+
+if lat_col is None or lon_col is None:
+    st.error("Could not detect latitude/longitude columns")
+    st.stop()
+
+# -----------------------------
+# PARSE POINTS
+# -----------------------------
 points = []
 heat_data = []
 
@@ -39,63 +54,79 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
         lon = float(lon)
 
         if -90 <= lat <= 90 and -180 <= lon <= 180:
-            points.append(Point(lon, lat))
+            pt = Point(lon, lat)
+            points.append(pt)
             heat_data.append([lat, lon])
     except:
         continue
+
+if len(heat_data) == 0:
+    st.error("No valid GPS points found")
+    st.stop()
+
+st.success(f"Valid GPS points used: {len(heat_data)}")
 
 center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# BUILD GEOFENCES (handles both formats)
+# BUILD GEOFENCES (ROBUST)
 # -----------------------------
-def build_polygons(latlon_mode=False):
+def build_polygons():
 
-    polygons = []
+    polys = []
 
     for _, row in geo_df.iterrows():
 
         zone = str(row.iloc[0]).strip()
         values = row.iloc[1:].dropna().values
 
-        coords = []
+        coords_lonlat = []
+        coords_latlon = []
 
         for i in range(0, len(values)-1, 2):
             try:
                 a = float(values[i])
                 b = float(values[i+1])
 
-                if latlon_mode:
-                    lat, lon = a, b
-                else:
-                    lon, lat = a, b
-
-                coords.append((lon, lat))
+                coords_lonlat.append((a, b))  # lon, lat
+                coords_latlon.append((b, a))  # lon, lat flipped
             except:
                 continue
 
-        if len(coords) >= 3:
+        # Try BOTH interpretations
+        for coords in [coords_lonlat, coords_latlon]:
+
+            if len(coords) < 3:
+                continue
+
             if coords[0] != coords[-1]:
                 coords.append(coords[0])
 
-            poly = Polygon(coords)
+            try:
+                poly = Polygon(coords)
 
-            if poly.is_valid:
-                polygons.append({
-                    "zone": zone,
-                    "polygon": poly
-                })
+                if poly.is_valid:
+                    polys.append({
+                        "zone": zone,
+                        "polygon": poly
+                    })
+                    break
+            except:
+                continue
 
-    return polygons
+    return polys
 
-polygons = build_polygons(False)
+polygons = build_polygons()
 
 if len(polygons) == 0:
-    polygons = build_polygons(True)
+    st.error("No valid geofences detected")
+    st.stop()
+
+st.success(f"Loaded {len(polygons)} geofences")
 
 # -----------------------------
-# PROXIMITY (5m)
+# PROXIMITY
 # -----------------------------
 BUFFER_DEGREES = 5 / 111320
 
@@ -117,7 +148,7 @@ for poly in polygons:
     poly["buffer"] = buffer_poly
 
 # -----------------------------
-# ZONE CONTROLS
+# UI CONTROLS
 # -----------------------------
 zones = [p["zone"] for p in polygons]
 
@@ -135,26 +166,30 @@ highlight_zone = st.selectbox(
 # -----------------------------
 # MAP
 # -----------------------------
-m = folium.Map(location=[center_lat, center_lon], zoom_start=16, tiles=None)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=15, tiles=None)
 
-# Stable tile layers (fix 403 issue)
+# FIXED TILE PROVIDERS
 folium.TileLayer(
-    tiles="https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
-    attr="OSM HOT",
-    name="Street Map"
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri Satellite",
+    name="Satellite",
+    control=True
 ).add_to(m)
 
 folium.TileLayer(
-    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri",
-    name="Satellite"
+    tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attr="OpenStreetMap",
+    name="Street",
+    control=True
 ).add_to(m)
 
 folium.LayerControl().add_to(m)
 
+# HEATMAP
 if show_heatmap:
-    HeatMap(heat_data, radius=20, blur=15).add_to(m)
+    HeatMap(heat_data, radius=18, blur=12).add_to(m)
 
+# GEOFENCES
 if show_zones:
 
     for poly in polygons:
@@ -169,18 +204,19 @@ if show_zones:
         folium.Polygon(
             coords,
             color=color,
-            weight=4,
+            weight=3,
             fill=True,
             fill_opacity=0.2
         ).add_to(m)
 
+        # 5m buffer
         buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
             buffer_coords,
             color="orange",
             weight=2,
-            dash_array="6,6"
+            dash_array="5,5"
         ).add_to(m)
 
         c = poly["polygon"].centroid
@@ -198,31 +234,29 @@ if show_zones:
             popup=folium.Popup(popup_html),
             tooltip=popup_html,
             icon=folium.DivIcon(
-                html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid black'>{poly['count']}</div>"
+                html=f"<div style='background:white;border-radius:50%;width:24px;height:24px;text-align:center;border:1px solid black'>{poly['count']}</div>"
             )
         ).add_to(m)
 
         folium.Marker(
-            [c.y + 0.00006, c.x],
-            tooltip=f"Within 5m: {poly['near_count']}",
+            [c.y + 0.00005, c.x],
+            tooltip=f"5m: {poly['near_count']}",
             icon=folium.DivIcon(
-                html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange'>{poly['near_count']}</div>"
+                html=f"<div style='background:#ffe5b4;border-radius:50%;width:24px;height:24px;text-align:center;border:1px solid orange'>{poly['near_count']}</div>"
             )
         ).add_to(m)
 
 # -----------------------------
-# RENDER MAP
+# RENDER
 # -----------------------------
-st.caption("Tip: Use the layer control (top right of map) to switch map styles")
-
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
-# RESULTS TABLE
+# TABLE
 # -----------------------------
 st.subheader("Geofence Breakdown")
 
-results_df = pd.DataFrame([
+df = pd.DataFrame([
     {
         "zone": p["zone"],
         "inside": p["count"],
@@ -231,25 +265,25 @@ results_df = pd.DataFrame([
     for p in polygons
 ]).sort_values("inside", ascending=False)
 
-st.dataframe(results_df, use_container_width=True)
+st.dataframe(df, use_container_width=True)
 
 st.download_button(
     "Download CSV",
-    results_df.to_csv(index=False),
+    df.to_csv(index=False),
     "geofence_counts.csv"
 )
 
 # -----------------------------
-# DOWNLOAD INTERACTIVE MAP
+# DOWNLOAD MAP
 # -----------------------------
 if st.button("Download Interactive Map"):
 
-    map_file = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
-    m.save(map_file.name)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+    m.save(tmp.name)
 
-    with open(map_file.name, "rb") as f:
+    with open(tmp.name, "rb") as f:
         st.download_button(
-            "Download Map File",
+            "Download Map",
             f,
-            file_name="geofence_map.html"
+            "map.html"
         )
