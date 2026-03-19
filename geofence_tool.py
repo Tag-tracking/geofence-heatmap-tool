@@ -4,12 +4,13 @@ import folium
 from shapely.geometry import Point, Polygon
 from folium.plugins import HeatMap
 import streamlit.components.v1 as components
+import tempfile
 
 st.set_page_config(layout="wide")
 st.title("Geofence Heatmap Analyzer")
 
 # -----------------------------
-# UPLOAD
+# FILE UPLOAD
 # -----------------------------
 points_file = st.file_uploader("Upload Heatmap CSV")
 geo_file = st.file_uploader("Upload Geofence CSV")
@@ -38,13 +39,13 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     except:
         continue
 
-st.write(f"DEBUG: Heat points = {len(heat_data)}")
-
 center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
+st.success(f"Valid GPS points: {len(heat_data)}")
+
 # -----------------------------
-# GEOFENCES (STRICT lon,lat)
+# GEOFENCES
 # -----------------------------
 polygons = []
 
@@ -72,61 +73,159 @@ for _, row in geo_df.iterrows():
         if poly.is_valid:
             polygons.append({"zone": zone, "polygon": poly})
 
-st.write(f"DEBUG: Polygons = {len(polygons)}")
+st.success(f"Loaded {len(polygons)} geofences")
 
 # -----------------------------
-# MAP (IMPORTANT FIX)
-# -----------------------------
-m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=15,
-    tiles=None  # 🔥 CRITICAL FIX
-)
-
-# Satellite only (clean + reliable)
-folium.TileLayer(
-    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri",
-).add_to(m)
-
-# -----------------------------
-# HEATMAP (VISIBLE AGAIN)
-# -----------------------------
-HeatMap(
-    heat_data,
-    radius=25,      # 🔥 bigger = visible
-    blur=10,
-    min_opacity=0.4
-).add_to(m)
-
-# -----------------------------
-# GEOFENCES (VISIBLE AGAIN)
+# PROXIMITY CALC (5m)
 # -----------------------------
 BUFFER = 5 / 111320
 
 for poly in polygons:
 
+    inside = 0
+    near = 0
+
     buffer_poly = poly["polygon"].buffer(BUFFER)
+
+    for p in points:
+        if poly["polygon"].contains(p):
+            inside += 1
+        elif buffer_poly.contains(p):
+            near += 1
+
+    poly["count"] = inside
+    poly["near_count"] = near
+    poly["buffer"] = buffer_poly
+
+# -----------------------------
+# UI CONTROLS
+# -----------------------------
+zones = [p["zone"] for p in polygons]
+
+selected_zones = st.multiselect(
+    "Select geofences to display",
+    zones,
+    default=zones
+)
+
+highlight_zone = st.selectbox(
+    "Highlight a zone",
+    ["None"] + zones
+)
+
+# -----------------------------
+# MAP
+# -----------------------------
+m = folium.Map(
+    location=[center_lat, center_lon],
+    zoom_start=15,
+    tiles=None
+)
+
+folium.TileLayer(
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri Satellite"
+).add_to(m)
+
+# -----------------------------
+# HEATMAP
+# -----------------------------
+HeatMap(
+    heat_data,
+    radius=25,
+    blur=10,
+    min_opacity=0.4
+).add_to(m)
+
+# -----------------------------
+# GEOFENCES
+# -----------------------------
+for poly in polygons:
+
+    if poly["zone"] not in selected_zones:
+        continue
 
     coords = [(y, x) for x, y in poly["polygon"].exterior.coords]
 
+    color = "yellow" if poly["zone"] == highlight_zone else "lime"
+
     folium.Polygon(
         coords,
-        color="lime",
-        weight=5,        # 🔥 thicker
+        color=color,
+        weight=4,
         fill=True,
         fill_opacity=0.2
     ).add_to(m)
 
-    buffer_coords = [(y, x) for x, y in buffer_poly.exterior.coords]
+    # 5m buffer
+    buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
 
     folium.PolyLine(
         buffer_coords,
         color="orange",
-        weight=3
+        weight=2,
+        dash_array="5,5"
+    ).add_to(m)
+
+    # Marker + popup
+    c = poly["polygon"].centroid
+
+    popup_html = f"""
+    <div style="font-size:13px;padding:6px;">
+        <b>{poly['zone']}</b><br>
+        Inside: {poly['count']}<br>
+        Within 5m: {poly['near_count']}
+    </div>
+    """
+
+    folium.Marker(
+        [c.y, c.x],
+        popup=folium.Popup(popup_html, max_width=200),
+        tooltip=poly["zone"],
+        icon=folium.DivIcon(
+            html=f"<div style='background:white;border-radius:50%;width:26px;height:26px;text-align:center;border:2px solid black'>{poly['count']}</div>"
+        )
     ).add_to(m)
 
 # -----------------------------
-# RENDER
+# RENDER MAP
 # -----------------------------
 components.html(m._repr_html_(), height=700)
+
+# -----------------------------
+# BREAKDOWN TABLE
+# -----------------------------
+st.subheader("Geofence Breakdown")
+
+df = pd.DataFrame([
+    {
+        "zone": p["zone"],
+        "inside": p["count"],
+        "within_5m": p["near_count"]
+    }
+    for p in polygons
+]).sort_values("inside", ascending=False)
+
+st.dataframe(df, use_container_width=True)
+
+st.download_button(
+    "Download CSV",
+    df.to_csv(index=False),
+    "geofence_counts.csv"
+)
+
+# -----------------------------
+# DOWNLOAD INTERACTIVE MAP
+# -----------------------------
+if st.button("Download Interactive Map (Send to Client)"):
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+    m.save(tmp.name)
+
+    with open(tmp.name, "rb") as f:
+        st.download_button(
+            label="Download Map File",
+            data=f,
+            file_name="geofence_map.html",
+            mime="text/html"
+        )
