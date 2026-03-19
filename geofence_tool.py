@@ -4,11 +4,7 @@ import folium
 from shapely.geometry import Point, Polygon
 from folium.plugins import HeatMap
 import streamlit.components.v1 as components
-from reportlab.platypus import SimpleDocTemplate, Image, Paragraph, Spacer
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
 import tempfile
-from playwright.sync_api import sync_playwright
 
 st.set_page_config(layout="wide")
 st.title("Geofence Heatmap Analyzer")
@@ -41,6 +37,7 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     try:
         lat = float(lat)
         lon = float(lon)
+
         if -90 <= lat <= 90 and -180 <= lon <= 180:
             points.append(Point(lon, lat))
             heat_data.append([lat, lon])
@@ -51,7 +48,7 @@ center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# BUILD GEOFENCES (handles both formats)
+# BUILD GEOFENCES (auto handles both formats)
 # -----------------------------
 def build_polygons(latlon_mode=False):
 
@@ -98,7 +95,7 @@ if len(polygons) == 0:
     polygons = build_polygons(True)
 
 # -----------------------------
-# PROXIMITY
+# PROXIMITY (5m)
 # -----------------------------
 BUFFER_DEGREES = 5 / 111320
 
@@ -120,7 +117,7 @@ for poly in polygons:
     poly["buffer"] = buffer_poly
 
 # -----------------------------
-# UI CONTROLS
+# ZONE CONTROLS
 # -----------------------------
 zones = [p["zone"] for p in polygons]
 
@@ -203,6 +200,9 @@ if show_zones:
             )
         ).add_to(m)
 
+# -----------------------------
+# RENDER MAP
+# -----------------------------
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
@@ -224,73 +224,16 @@ st.download_button(
 )
 
 # -----------------------------
-# PDF (REAL MAPS)
+# DOWNLOAD INTERACTIVE MAP
 # -----------------------------
-def create_zone_map(poly):
+if st.button("Download Interactive Map"):
 
-    c = poly["polygon"].centroid
+    map_file = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+    m.save(map_file.name)
 
-    m = folium.Map(location=[c.y, c.x], zoom_start=18)
-
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri"
-    ).add_to(m)
-
-    HeatMap(heat_data, radius=20, blur=15).add_to(m)
-
-    coords = [(y, x) for x, y in poly["polygon"].exterior.coords]
-
-    folium.Polygon(coords, color="lime", fill=True, fill_opacity=0.2).add_to(m)
-
-    return m
-
-def screenshot_map(html, img):
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width":1200,"height":800})
-        page.goto(f"file://{html}")
-        page.wait_for_timeout(2000)
-        page.screenshot(path=img)
-        browser.close()
-
-def generate_pdf(polygons):
-
-    styles = getSampleStyleSheet()
-    elements = []
-
-    for poly in polygons:
-
-        html_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
-        img_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-
-        m = create_zone_map(poly)
-        m.save(html_tmp.name)
-
-        screenshot_map(html_tmp.name, img_tmp.name)
-
-        elements.append(Image(img_tmp.name, width=500, height=300))
-
-        elements.append(Paragraph(
-            f"<b>{poly['zone']}</b><br/>Inside: {poly['count']}<br/>Within 5m: {poly['near_count']}",
-            styles["Normal"]
-        ))
-
-        elements.append(Spacer(1, 20))
-
-    pdf_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-
-    doc = SimpleDocTemplate(pdf_file.name, pagesize=letter)
-    doc.build(elements)
-
-    return pdf_file.name
-
-if st.button("📄 Generate PDF Report"):
-
-    with st.spinner("Generating PDF (15–40s)..."):
-
-        pdf_path = generate_pdf(polygons)
-
-        with open(pdf_path, "rb") as f:
-            st.download_button("Download PDF", f, "geofence_report.pdf")
+    with open(map_file.name, "rb") as f:
+        st.download_button(
+            "Download Map File",
+            f,
+            file_name="geofence_map.html"
+        )
