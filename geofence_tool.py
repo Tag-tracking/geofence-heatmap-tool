@@ -4,72 +4,32 @@ import folium
 from shapely.geometry import Point, Polygon
 from folium.plugins import HeatMap
 import streamlit.components.v1 as components
-import json
-import base64
+import matplotlib.pyplot as plt
+from reportlab.platypus import SimpleDocTemplate, Image, Paragraph, Spacer, Table
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+import tempfile
 
 st.set_page_config(layout="wide")
-
 st.title("Geofence Heatmap Analyzer")
 
 # -----------------------------
-# ENCODE / DECODE FUNCTIONS
+# FILE UPLOAD
 # -----------------------------
-def encode_data(points_df, geo_df):
-    payload = {
-        "points": points_df.to_dict(),
-        "geofences": geo_df.to_dict()
-    }
-    json_str = json.dumps(payload)
-    return base64.urlsafe_b64encode(json_str.encode()).decode()
+points_file = st.file_uploader("Upload Heatmap CSV")
+geo_file = st.file_uploader("Upload Geofence CSV")
 
-def decode_data(encoded_str):
-    decoded = base64.urlsafe_b64decode(encoded_str.encode()).decode()
-    data = json.loads(decoded)
-    return pd.DataFrame(data["points"]), pd.DataFrame(data["geofences"])
+show_heatmap = st.checkbox("Show Heatmap", True)
+show_zones = st.checkbox("Show Geofences", True)
 
-# -----------------------------
-# CLIENT MODE DETECTION
-# -----------------------------
-query_params = st.query_params
-client_mode = query_params.get("view") == "client"
-encoded_data = query_params.get("data")
+if not points_file or not geo_file:
+    st.stop()
+
+points_df = pd.read_csv(points_file)
+geo_df = pd.read_csv(geo_file)
 
 # -----------------------------
-# LOAD DATA
-# -----------------------------
-if encoded_data:
-    points_df, geo_df = decode_data(encoded_data)
-    show_heatmap = True
-    show_zones = True
-
-else:
-    if not client_mode:
-        points_file = st.file_uploader("Upload Heatmap CSV")
-        geo_file = st.file_uploader("Upload Geofence CSV")
-
-        show_heatmap = st.checkbox("Show Heatmap", True)
-        show_zones = st.checkbox("Show Geofences", True)
-
-        if not points_file or not geo_file:
-            st.stop()
-
-        points_df = pd.read_csv(points_file)
-        geo_df = pd.read_csv(geo_file)
-    else:
-        st.warning("No data provided in link")
-        st.stop()
-
-# -----------------------------
-# GENERATE CLIENT LINK
-# -----------------------------
-if not client_mode:
-    st.subheader("🔗 Share with Client")
-    encoded = encode_data(points_df, geo_df)
-    client_link = f"?view=client&data={encoded}"
-    st.text_area("Copy this link and send to client:", client_link, height=100)
-
-# -----------------------------
-# LOAD HEATMAP DATA
+# LOAD HEATMAP
 # -----------------------------
 lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
 lon_col = [c for c in points_df.columns if "lon" in c.lower()][0]
@@ -94,7 +54,7 @@ center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# BUILD GEOFENCES (STABLE)
+# BUILD GEOFENCES
 # -----------------------------
 def build_polygons(latlon_mode=False):
 
@@ -163,24 +123,20 @@ for poly in polygons:
     poly["buffer"] = buffer_poly
 
 # -----------------------------
-# ZONE FILTER (HIDDEN IN CLIENT MODE)
+# ZONE CONTROLS
 # -----------------------------
 zones = [p["zone"] for p in polygons]
 
-if not client_mode:
-    selected_zones = st.multiselect(
-        "Select geofences to display",
-        zones,
-        default=zones
-    )
+selected_zones = st.multiselect(
+    "Select geofences to display",
+    zones,
+    default=zones
+)
 
-    highlight_zone = st.selectbox(
-        "Highlight a zone",
-        ["None"] + zones
-    )
-else:
-    selected_zones = zones
-    highlight_zone = "None"
+highlight_zone = st.selectbox(
+    "Highlight a zone",
+    ["None"] + zones
+)
 
 # -----------------------------
 # MAP
@@ -258,7 +214,7 @@ if show_zones:
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
-# RESULTS TABLE
+# RESULTS TABLE + CSV
 # -----------------------------
 results_df = pd.DataFrame([
     {
@@ -272,12 +228,93 @@ results_df = pd.DataFrame([
 st.subheader("Geofence Breakdown")
 st.dataframe(results_df, use_container_width=True)
 
+st.download_button(
+    "Download CSV",
+    results_df.to_csv(index=False),
+    "geofence_counts.csv"
+)
+
 # -----------------------------
-# EXPORT
+# PDF GENERATION
 # -----------------------------
-if not client_mode:
-    st.download_button(
-        "Download CSV",
-        results_df.to_csv(index=False),
-        "geofence_counts.csv"
-    )
+def create_zone_image(poly, points, filename):
+
+    fig, ax = plt.subplots(figsize=(3, 3))
+
+    x, y = poly["polygon"].exterior.xy
+    ax.plot(x, y)
+
+    xs = [p.x for p in points]
+    ys = [p.y for p in points]
+
+    ax.scatter(xs, ys, s=1)
+
+    minx, miny, maxx, maxy = poly["polygon"].bounds
+    ax.set_xlim(minx, maxx)
+    ax.set_ylim(miny, maxy)
+
+    ax.axis('off')
+
+    plt.savefig(filename, bbox_inches='tight')
+    plt.close()
+
+
+def generate_pdf(polygons, points):
+
+    styles = getSampleStyleSheet()
+    elements = []
+
+    cols = 4
+    rows = 5
+
+    grid = []
+    temp_files = []
+
+    for poly in polygons:
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        temp_files.append(tmp.name)
+
+        create_zone_image(poly, points, tmp.name)
+
+        img = Image(tmp.name, width=120, height=120)
+
+        text = Paragraph(
+            f"<b>{poly['zone']}</b><br/>"
+            f"Inside: {poly['count']}<br/>"
+            f"Within 5m: {poly['near_count']}",
+            styles["Normal"]
+        )
+
+        grid.append([img, text])
+
+        if len(grid) == cols * rows:
+            table = Table([grid[i:i+cols] for i in range(0, len(grid), cols)])
+            elements.append(table)
+            elements.append(Spacer(1, 20))
+            grid = []
+
+    if grid:
+        table = Table([grid[i:i+cols] for i in range(0, len(grid), cols)])
+        elements.append(table)
+
+    pdf_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+
+    doc = SimpleDocTemplate(pdf_file.name, pagesize=letter)
+    doc.build(elements)
+
+    return pdf_file.name
+
+
+if st.button("📄 Generate PDF Report"):
+
+    with st.spinner("Generating PDF..."):
+
+        pdf_path = generate_pdf(polygons, points)
+
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "Download PDF",
+                f,
+                file_name="geofence_report.pdf"
+            )
