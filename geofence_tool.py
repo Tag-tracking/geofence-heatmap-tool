@@ -4,6 +4,7 @@ import folium
 from shapely.geometry import Point, Polygon
 from folium.plugins import HeatMap
 import streamlit.components.v1 as components
+import tempfile
 
 st.set_page_config(layout="wide")
 st.title("Geofence Heatmap Analyzer")
@@ -14,7 +15,13 @@ st.title("Geofence Heatmap Analyzer")
 points_file = st.file_uploader("Upload Heatmap CSV")
 geo_file = st.file_uploader("Upload Geofence CSV")
 
-show_heatmap = st.checkbox("Show Heatmap", True)
+# Display mode toggle
+view_mode = st.radio(
+    "Display Mode",
+    ["Heatmap", "Dots"],
+    horizontal=True
+)
+
 show_zones = st.checkbox("Show Geofences", True)
 
 if not points_file or not geo_file:
@@ -151,8 +158,11 @@ folium.TileLayer(
     max_zoom=21
 ).add_to(m)
 
-# heatmap
-if show_heatmap:
+# -----------------------------
+# HEATMAP OR DOTS
+# -----------------------------
+if view_mode == "Heatmap":
+
     HeatMap(
         heat_data,
         radius=25,
@@ -160,7 +170,21 @@ if show_heatmap:
         min_opacity=0.4
     ).add_to(m)
 
-# geofences
+elif view_mode == "Dots":
+
+    for lat, lon in heat_data:
+        folium.CircleMarker(
+            location=[lat, lon],
+            radius=4,
+            color="orange",
+            fill=True,
+            fill_opacity=0.9,
+            weight=0
+        ).add_to(m)
+
+# -----------------------------
+# GEOFENCES
+# -----------------------------
 if show_zones:
 
     for poly in polygons:
@@ -180,7 +204,6 @@ if show_zones:
             fill_opacity=0.15
         ).add_to(m)
 
-        # buffer
         buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -192,8 +215,7 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        # hover popup (tooltip)
-        popup = f"""
+        tooltip_html = f"""
         <div style="font-size:14px;padding:8px;min-width:140px;">
             <b>{poly['zone']}</b><br>
             <hr style="margin:4px 0;">
@@ -205,7 +227,7 @@ if show_zones:
         # inside marker
         folium.Marker(
             [c.y, c.x],
-            tooltip=popup,
+            tooltip=tooltip_html,
             icon=folium.DivIcon(
                 html=f"""
                 <div style="
@@ -254,7 +276,7 @@ if show_zones:
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
-# BREAKDOWN TABLE (ADDED BACK)
+# BREAKDOWN TABLE
 # -----------------------------
 st.subheader("Geofence Breakdown")
 
@@ -275,9 +297,10 @@ st.download_button(
     "geofence_counts.csv"
 )
 
-import tempfile
-
-st.subheader("Export")
+# -----------------------------
+# HTML EXPORT
+# -----------------------------
+st.subheader("Export Map")
 
 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
 m.save(tmp.name)
