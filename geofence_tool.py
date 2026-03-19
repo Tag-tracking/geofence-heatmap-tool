@@ -6,19 +6,30 @@ from folium.plugins import HeatMap
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
+
+# -----------------------------
+# CLIENT MODE (URL CONTROL)
+# -----------------------------
+query_params = st.query_params
+client_mode = query_params.get("view") == "client"
+
 st.title("Geofence Heatmap Analyzer")
 
 # -----------------------------
-# FILE UPLOAD
+# FILE UPLOAD (HIDDEN IN CLIENT MODE)
 # -----------------------------
-points_file = st.file_uploader("Upload Heatmap CSV")
-geo_file = st.file_uploader("Upload Geofence CSV")
+if not client_mode:
+    points_file = st.file_uploader("Upload Heatmap CSV")
+    geo_file = st.file_uploader("Upload Geofence CSV")
 
-show_heatmap = st.checkbox("Show Heatmap", True)
-show_zones = st.checkbox("Show Geofences", True)
+    show_heatmap = st.checkbox("Show Heatmap", True)
+    show_zones = st.checkbox("Show Geofences", True)
 
-if not points_file or not geo_file:
-    st.stop()
+    if not points_file or not geo_file:
+        st.stop()
+else:
+    st.info("Client view mode enabled")
+    st.stop()  # For now requires upload mode first (can extend later)
 
 # -----------------------------
 # LOAD HEATMAP
@@ -149,9 +160,11 @@ folium.TileLayer(
     attr="Esri"
 ).add_to(m)
 
+# heatmap
 if show_heatmap:
     HeatMap(heat_data, radius=20, blur=15).add_to(m)
 
+# geofences
 if show_zones:
 
     for poly in polygons:
@@ -171,6 +184,7 @@ if show_zones:
             fill_opacity=0.15
         ).add_to(m)
 
+        # buffer
         buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -182,18 +196,35 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        popup = f"{poly['zone']}<br>Inside: {poly['count']}<br>5m: {poly['near_count']}"
+        # ✅ FIXED POPUP
+        popup_html = f"""
+        <div style="
+            font-size:13px;
+            padding:6px;
+            min-width:140px;
+        ">
+            <b>{poly['zone']}</b><br>
+            Inside: {poly['count']}<br>
+            Within 5m: {poly['near_count']}
+        </div>
+        """
 
+        popup = folium.Popup(popup_html, max_width=250)
+
+        # inside marker
         folium.Marker(
             [c.y, c.x],
             popup=popup,
+            tooltip=popup_html,
             icon=folium.DivIcon(
                 html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid black'>{poly['count']}</div>"
             )
         ).add_to(m)
 
+        # 5m marker
         folium.Marker(
             [c.y + 0.00006, c.x],
+            tooltip=f"Within 5m: {poly['near_count']}",
             icon=folium.DivIcon(
                 html=f"<div style='background:#ffe5b4;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid orange'>{poly['near_count']}</div>"
             )
