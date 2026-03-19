@@ -4,38 +4,73 @@ import folium
 from shapely.geometry import Point, Polygon
 from folium.plugins import HeatMap
 import streamlit.components.v1 as components
+import json
+import base64
 
 st.set_page_config(layout="wide")
-
-# -----------------------------
-# CLIENT MODE (URL CONTROL)
-# -----------------------------
-query_params = st.query_params
-client_mode = query_params.get("view") == "client"
 
 st.title("Geofence Heatmap Analyzer")
 
 # -----------------------------
-# FILE UPLOAD (HIDDEN IN CLIENT MODE)
+# ENCODE / DECODE FUNCTIONS
+# -----------------------------
+def encode_data(points_df, geo_df):
+    payload = {
+        "points": points_df.to_dict(),
+        "geofences": geo_df.to_dict()
+    }
+    json_str = json.dumps(payload)
+    return base64.urlsafe_b64encode(json_str.encode()).decode()
+
+def decode_data(encoded_str):
+    decoded = base64.urlsafe_b64decode(encoded_str.encode()).decode()
+    data = json.loads(decoded)
+    return pd.DataFrame(data["points"]), pd.DataFrame(data["geofences"])
+
+# -----------------------------
+# CLIENT MODE DETECTION
+# -----------------------------
+query_params = st.query_params
+client_mode = query_params.get("view") == "client"
+encoded_data = query_params.get("data")
+
+# -----------------------------
+# LOAD DATA
+# -----------------------------
+if encoded_data:
+    points_df, geo_df = decode_data(encoded_data)
+    show_heatmap = True
+    show_zones = True
+
+else:
+    if not client_mode:
+        points_file = st.file_uploader("Upload Heatmap CSV")
+        geo_file = st.file_uploader("Upload Geofence CSV")
+
+        show_heatmap = st.checkbox("Show Heatmap", True)
+        show_zones = st.checkbox("Show Geofences", True)
+
+        if not points_file or not geo_file:
+            st.stop()
+
+        points_df = pd.read_csv(points_file)
+        geo_df = pd.read_csv(geo_file)
+    else:
+        st.warning("No data provided in link")
+        st.stop()
+
+# -----------------------------
+# GENERATE CLIENT LINK
 # -----------------------------
 if not client_mode:
-    points_file = st.file_uploader("Upload Heatmap CSV")
-    geo_file = st.file_uploader("Upload Geofence CSV")
-
-    show_heatmap = st.checkbox("Show Heatmap", True)
-    show_zones = st.checkbox("Show Geofences", True)
-
-    if not points_file or not geo_file:
-        st.stop()
-else:
-    st.info("Client view mode enabled")
-    st.stop()  # For now requires upload mode first (can extend later)
+    st.subheader("🔗 Share with Client")
+    encoded = encode_data(points_df, geo_df)
+    client_link = f"?view=client&data={encoded}"
+    st.text_area("Copy this link and send to client:", client_link, height=100)
 
 # -----------------------------
-# LOAD HEATMAP
+# LOAD HEATMAP DATA
 # -----------------------------
-points_df = pd.read_csv(points_file)
-
 lat_col = [c for c in points_df.columns if "lat" in c.lower()][0]
 lon_col = [c for c in points_df.columns if "lon" in c.lower()][0]
 
@@ -55,16 +90,12 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     except:
         continue
 
-st.write(f"Valid GPS points used: {len(points)}")
-
 center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# LOAD GEOFENCES (STABLE)
+# BUILD GEOFENCES (STABLE)
 # -----------------------------
-geo_df = pd.read_csv(geo_file)
-
 def build_polygons(latlon_mode=False):
 
     polygons = []
@@ -108,12 +139,9 @@ polygons = build_polygons(False)
 
 if len(polygons) == 0:
     polygons = build_polygons(True)
-    st.warning("Fallback to lat/lon parsing")
-
-st.write(f"Loaded {len(polygons)} geofences")
 
 # -----------------------------
-# 5M PROXIMITY
+# PROXIMITY ANALYSIS
 # -----------------------------
 BUFFER_DEGREES = 5 / 111320
 
@@ -135,20 +163,24 @@ for poly in polygons:
     poly["buffer"] = buffer_poly
 
 # -----------------------------
-# ZONE FILTER
+# ZONE FILTER (HIDDEN IN CLIENT MODE)
 # -----------------------------
 zones = [p["zone"] for p in polygons]
 
-selected_zones = st.multiselect(
-    "Select geofences to display",
-    zones,
-    default=zones
-)
+if not client_mode:
+    selected_zones = st.multiselect(
+        "Select geofences to display",
+        zones,
+        default=zones
+    )
 
-highlight_zone = st.selectbox(
-    "Highlight a zone",
-    ["None"] + zones
-)
+    highlight_zone = st.selectbox(
+        "Highlight a zone",
+        ["None"] + zones
+    )
+else:
+    selected_zones = zones
+    highlight_zone = "None"
 
 # -----------------------------
 # MAP
@@ -160,11 +192,9 @@ folium.TileLayer(
     attr="Esri"
 ).add_to(m)
 
-# heatmap
 if show_heatmap:
     HeatMap(heat_data, radius=20, blur=15).add_to(m)
 
-# geofences
 if show_zones:
 
     for poly in polygons:
@@ -184,7 +214,6 @@ if show_zones:
             fill_opacity=0.15
         ).add_to(m)
 
-        # buffer
         buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
 
         folium.PolyLine(
@@ -196,13 +225,8 @@ if show_zones:
 
         c = poly["polygon"].centroid
 
-        # ✅ FIXED POPUP
         popup_html = f"""
-        <div style="
-            font-size:13px;
-            padding:6px;
-            min-width:140px;
-        ">
+        <div style="font-size:13px;padding:6px;min-width:140px;">
             <b>{poly['zone']}</b><br>
             Inside: {poly['count']}<br>
             Within 5m: {poly['near_count']}
@@ -211,7 +235,6 @@ if show_zones:
 
         popup = folium.Popup(popup_html, max_width=250)
 
-        # inside marker
         folium.Marker(
             [c.y, c.x],
             popup=popup,
@@ -221,7 +244,6 @@ if show_zones:
             )
         ).add_to(m)
 
-        # 5m marker
         folium.Marker(
             [c.y + 0.00006, c.x],
             tooltip=f"Within 5m: {poly['near_count']}",
@@ -236,7 +258,7 @@ if show_zones:
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
-# RESULTS TABLE + EXPORT
+# RESULTS TABLE
 # -----------------------------
 results_df = pd.DataFrame([
     {
@@ -245,15 +267,17 @@ results_df = pd.DataFrame([
         "within_5m": p["near_count"]
     }
     for p in polygons
-])
-
-results_df = results_df.sort_values("inside_count", ascending=False)
+]).sort_values("inside_count", ascending=False)
 
 st.subheader("Geofence Breakdown")
 st.dataframe(results_df, use_container_width=True)
 
-st.download_button(
-    "Download CSV",
-    results_df.to_csv(index=False),
-    "geofence_counts.csv"
-)
+# -----------------------------
+# EXPORT
+# -----------------------------
+if not client_mode:
+    st.download_button(
+        "Download CSV",
+        results_df.to_csv(index=False),
+        "geofence_counts.csv"
+    )
