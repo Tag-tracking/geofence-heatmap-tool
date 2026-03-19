@@ -4,11 +4,11 @@ import folium
 from shapely.geometry import Point, Polygon
 from folium.plugins import HeatMap
 import streamlit.components.v1 as components
-import matplotlib.pyplot as plt
-from reportlab.platypus import SimpleDocTemplate, Image, Paragraph, Spacer, Table
+from reportlab.platypus import SimpleDocTemplate, Image, Paragraph, Spacer
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 import tempfile
+from playwright.sync_api import sync_playwright
 
 st.set_page_config(layout="wide")
 st.title("Geofence Heatmap Analyzer")
@@ -41,12 +41,9 @@ for lat, lon in zip(points_df[lat_col], points_df[lon_col]):
     try:
         lat = float(lat)
         lon = float(lon)
-
-        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-            continue
-
-        points.append(Point(lon, lat))
-        heat_data.append([lat, lon])
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            points.append(Point(lon, lat))
+            heat_data.append([lat, lon])
     except:
         continue
 
@@ -54,7 +51,7 @@ center_lat = sum(p[0] for p in heat_data) / len(heat_data)
 center_lon = sum(p[1] for p in heat_data) / len(heat_data)
 
 # -----------------------------
-# BUILD GEOFENCES
+# BUILD GEOFENCES (handles both formats)
 # -----------------------------
 def build_polygons(latlon_mode=False):
 
@@ -72,10 +69,10 @@ def build_polygons(latlon_mode=False):
                 a = float(values[i])
                 b = float(values[i+1])
 
-                if not latlon_mode:
-                    lon, lat = a, b
-                else:
+                if latlon_mode:
                     lat, lon = a, b
+                else:
+                    lon, lat = a, b
 
                 coords.append((lon, lat))
             except:
@@ -101,7 +98,7 @@ if len(polygons) == 0:
     polygons = build_polygons(True)
 
 # -----------------------------
-# PROXIMITY ANALYSIS
+# PROXIMITY
 # -----------------------------
 BUFFER_DEGREES = 5 / 111320
 
@@ -123,7 +120,7 @@ for poly in polygons:
     poly["buffer"] = buffer_poly
 
 # -----------------------------
-# ZONE CONTROLS
+# UI CONTROLS
 # -----------------------------
 zones = [p["zone"] for p in polygons]
 
@@ -167,7 +164,7 @@ if show_zones:
             color=color,
             weight=4,
             fill=True,
-            fill_opacity=0.15
+            fill_opacity=0.2
         ).add_to(m)
 
         buffer_coords = [(y, x) for x, y in poly["buffer"].exterior.coords]
@@ -189,11 +186,9 @@ if show_zones:
         </div>
         """
 
-        popup = folium.Popup(popup_html, max_width=250)
-
         folium.Marker(
             [c.y, c.x],
-            popup=popup,
+            popup=folium.Popup(popup_html),
             tooltip=popup_html,
             icon=folium.DivIcon(
                 html=f"<div style='background:white;border-radius:50%;width:22px;height:22px;text-align:center;border:1px solid black'>{poly['count']}</div>"
@@ -208,25 +203,19 @@ if show_zones:
             )
         ).add_to(m)
 
-# -----------------------------
-# RENDER MAP
-# -----------------------------
 components.html(m._repr_html_(), height=650)
 
 # -----------------------------
-# RESULTS TABLE + CSV
+# CSV EXPORT
 # -----------------------------
 results_df = pd.DataFrame([
     {
         "zone": p["zone"],
-        "inside_count": p["count"],
+        "inside": p["count"],
         "within_5m": p["near_count"]
     }
     for p in polygons
-]).sort_values("inside_count", ascending=False)
-
-st.subheader("Geofence Breakdown")
-st.dataframe(results_df, use_container_width=True)
+]).sort_values("inside", ascending=False)
 
 st.download_button(
     "Download CSV",
@@ -235,68 +224,60 @@ st.download_button(
 )
 
 # -----------------------------
-# PDF GENERATION
+# PDF (REAL MAPS)
 # -----------------------------
-def create_zone_image(poly, points, filename):
+def create_zone_map(poly):
 
-    fig, ax = plt.subplots(figsize=(3, 3))
+    c = poly["polygon"].centroid
 
-    x, y = poly["polygon"].exterior.xy
-    ax.plot(x, y)
+    m = folium.Map(location=[c.y, c.x], zoom_start=18)
 
-    xs = [p.x for p in points]
-    ys = [p.y for p in points]
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri"
+    ).add_to(m)
 
-    ax.scatter(xs, ys, s=1)
+    HeatMap(heat_data, radius=20, blur=15).add_to(m)
 
-    minx, miny, maxx, maxy = poly["polygon"].bounds
-    ax.set_xlim(minx, maxx)
-    ax.set_ylim(miny, maxy)
+    coords = [(y, x) for x, y in poly["polygon"].exterior.coords]
 
-    ax.axis('off')
+    folium.Polygon(coords, color="lime", fill=True, fill_opacity=0.2).add_to(m)
 
-    plt.savefig(filename, bbox_inches='tight')
-    plt.close()
+    return m
 
+def screenshot_map(html, img):
 
-def generate_pdf(polygons, points):
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width":1200,"height":800})
+        page.goto(f"file://{html}")
+        page.wait_for_timeout(2000)
+        page.screenshot(path=img)
+        browser.close()
+
+def generate_pdf(polygons):
 
     styles = getSampleStyleSheet()
     elements = []
 
-    cols = 4
-    rows = 5
-
-    grid = []
-    temp_files = []
-
     for poly in polygons:
 
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        temp_files.append(tmp.name)
+        html_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+        img_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
 
-        create_zone_image(poly, points, tmp.name)
+        m = create_zone_map(poly)
+        m.save(html_tmp.name)
 
-        img = Image(tmp.name, width=120, height=120)
+        screenshot_map(html_tmp.name, img_tmp.name)
 
-        text = Paragraph(
-            f"<b>{poly['zone']}</b><br/>"
-            f"Inside: {poly['count']}<br/>"
-            f"Within 5m: {poly['near_count']}",
+        elements.append(Image(img_tmp.name, width=500, height=300))
+
+        elements.append(Paragraph(
+            f"<b>{poly['zone']}</b><br/>Inside: {poly['count']}<br/>Within 5m: {poly['near_count']}",
             styles["Normal"]
-        )
+        ))
 
-        grid.append([img, text])
-
-        if len(grid) == cols * rows:
-            table = Table([grid[i:i+cols] for i in range(0, len(grid), cols)])
-            elements.append(table)
-            elements.append(Spacer(1, 20))
-            grid = []
-
-    if grid:
-        table = Table([grid[i:i+cols] for i in range(0, len(grid), cols)])
-        elements.append(table)
+        elements.append(Spacer(1, 20))
 
     pdf_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
 
@@ -305,16 +286,11 @@ def generate_pdf(polygons, points):
 
     return pdf_file.name
 
-
 if st.button("📄 Generate PDF Report"):
 
-    with st.spinner("Generating PDF..."):
+    with st.spinner("Generating PDF (15–40s)..."):
 
-        pdf_path = generate_pdf(polygons, points)
+        pdf_path = generate_pdf(polygons)
 
         with open(pdf_path, "rb") as f:
-            st.download_button(
-                "Download PDF",
-                f,
-                file_name="geofence_report.pdf"
-            )
+            st.download_button("Download PDF", f, "geofence_report.pdf")
