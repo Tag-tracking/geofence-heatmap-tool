@@ -76,7 +76,7 @@ for _, row in geo_df.iterrows():
 st.success(f"Loaded {len(polygons)} geofences")
 
 # -----------------------------
-# PROXIMITY CALC (5m)
+# PROXIMITY (5m)
 # -----------------------------
 BUFFER = 5 / 111320
 
@@ -124,7 +124,8 @@ m = folium.Map(
 
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri Satellite"
+    attr="Esri Satellite",
+    max_zoom=21
 ).add_to(m)
 
 # -----------------------------
@@ -167,33 +168,73 @@ for poly in polygons:
         dash_array="5,5"
     ).add_to(m)
 
-    # Marker + popup
-    c = poly["polygon"].centroid
-
+    # Popup
     popup_html = f"""
-    <div style="font-size:13px;padding:6px;">
+    <div style="font-size:14px;padding:10px;min-width:160px;">
         <b>{poly['zone']}</b><br>
-        Inside: {poly['count']}<br>
-        Within 5m: {poly['near_count']}
+        <hr style="margin:4px 0;">
+        Inside: <b>{poly['count']}</b><br>
+        Within 5m: <b>{poly['near_count']}</b>
     </div>
     """
 
+    c = poly["polygon"].centroid
+
+    # Main count marker (centered)
     folium.Marker(
         [c.y, c.x],
-        popup=folium.Popup(popup_html, max_width=200),
+        popup=folium.Popup(popup_html, max_width=250),
         tooltip=poly["zone"],
         icon=folium.DivIcon(
-            html=f"<div style='background:white;border-radius:50%;width:26px;height:26px;text-align:center;border:2px solid black'>{poly['count']}</div>"
+            html=f"""
+            <div style="
+                background:white;
+                border-radius:50%;
+                width:28px;
+                height:28px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                border:2px solid black;
+                font-size:13px;
+                font-weight:bold;
+            ">
+                {poly['count']}
+            </div>
+            """
+        )
+    ).add_to(m)
+
+    # 5m marker (orange)
+    folium.Marker(
+        [c.y + 0.00006, c.x],
+        tooltip=f"5m: {poly['near_count']}",
+        icon=folium.DivIcon(
+            html=f"""
+            <div style="
+                background:#ffe5b4;
+                border-radius:50%;
+                width:26px;
+                height:26px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                border:2px solid orange;
+                font-size:12px;
+            ">
+                {poly['near_count']}
+            </div>
+            """
         )
     ).add_to(m)
 
 # -----------------------------
-# RENDER MAP
+# RENDER
 # -----------------------------
 components.html(m._repr_html_(), height=700)
 
 # -----------------------------
-# BREAKDOWN TABLE
+# TABLE
 # -----------------------------
 st.subheader("Geofence Breakdown")
 
@@ -215,7 +256,7 @@ st.download_button(
 )
 
 # -----------------------------
-# DOWNLOAD INTERACTIVE MAP
+# HTML DOWNLOAD
 # -----------------------------
 if st.button("Download Interactive Map (Send to Client)"):
 
